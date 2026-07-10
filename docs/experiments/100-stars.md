@@ -38,6 +38,24 @@ signals and opt-in issue/discussion responses.
 
 ## Protocol
 
+## D0 baseline
+
+Recorded at `2026-07-10T19:47:00Z`, immediately after publishing `v0.1.0`:
+
+| Signal | Baseline |
+|---|---:|
+| Stars | 0 |
+| Forks | 0 |
+| Subscribers | 0 |
+| Open user issues | 0 |
+| Open pull requests | 13 |
+| CI | Passed: Python 3.11–3.13, frontend, Rust, Docker, docs |
+| CodeQL | Passed: Python and JavaScript/TypeScript |
+| Release assets | 6 |
+
+All 13 pull requests were automated dependency updates created after the first
+push; they are recorded separately from user reports and contributions.
+
 ### D0–D2: establish the baseline
 
 - Tag the documentation state and record repository stars, unique contributors,
