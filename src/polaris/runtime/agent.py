@@ -410,6 +410,7 @@ class AgentRuntime:
             call_id = call.id
             snapshot_messages = request_snapshot.get("messages", ())
             snapshot_tools = request_snapshot.get("tools", ())
+            self._refresh_lease(step.id)
             async with self._lease_heartbeat(step.id):
                 completion = await self.provider.complete(
                     [
@@ -418,6 +419,33 @@ class AgentRuntime:
                         if isinstance(message, Mapping)
                     ],
                     cast(Sequence[Mapping[str, Any]], snapshot_tools),
+                )
+                micro_usd = self.cost_estimator(completion) if self.cost_estimator else 0
+                usage = completion.usage
+                if call_id is None or reservation_id is None:
+                    raise RuntimeError("provider bookkeeping was not initialized")
+                self._refresh_lease(step.id)
+                self.journal.complete_provider_call(
+                    call_id,
+                    response=serialize_completion(completion),
+                    model=completion.model,
+                    input_tokens=usage.prompt_tokens,
+                    output_tokens=usage.completion_tokens,
+                    micro_usd=micro_usd,
+                )
+                self._refresh_lease(step.id)
+                self.journal.settle_budget(
+                    run_id,
+                    reservation_id,
+                    actual_calls=1,
+                    actual_tokens=usage.total_tokens,
+                    actual_micro_usd=micro_usd,
+                )
+                self._refresh_lease(step.id)
+                self.journal.commit_step(
+                    step.id,
+                    self.config.worker_id,
+                    serialize_completion(completion),
                 )
         except BudgetExceededError as exc:
             self.journal.fail_step(step.id, self.config.worker_id, self._error(exc))
@@ -450,33 +478,6 @@ class AgentRuntime:
             )
             return False
 
-        micro_usd = self.cost_estimator(completion) if self.cost_estimator else 0
-        usage = completion.usage
-        if call_id is None or reservation_id is None:
-            raise RuntimeError("provider bookkeeping was not initialized")
-        self._refresh_lease(step.id)
-        self.journal.complete_provider_call(
-            call_id,
-            response=serialize_completion(completion),
-            model=completion.model,
-            input_tokens=usage.prompt_tokens,
-            output_tokens=usage.completion_tokens,
-            micro_usd=micro_usd,
-        )
-        self._refresh_lease(step.id)
-        self.journal.settle_budget(
-            run_id,
-            reservation_id,
-            actual_calls=1,
-            actual_tokens=usage.total_tokens,
-            actual_micro_usd=micro_usd,
-        )
-        self._refresh_lease(step.id)
-        self.journal.commit_step(
-            step.id,
-            self.config.worker_id,
-            serialize_completion(completion),
-        )
         return True
 
     async def _execute_tool_group(
