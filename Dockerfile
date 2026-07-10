@@ -2,7 +2,7 @@
 
 FROM ghcr.io/astral-sh/uv:0.8.17 AS uv
 
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
@@ -13,7 +13,7 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY src ./src
 RUN uv sync --locked --no-dev --no-editable
 
-FROM python:3.12-slim AS runtime
+FROM python:3.14-slim AS runtime
 ARG POLARIS_UID=10001
 ARG POLARIS_GID=10001
 ENV PATH="/app/.venv/bin:${PATH}" \
