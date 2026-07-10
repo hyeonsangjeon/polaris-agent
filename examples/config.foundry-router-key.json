@@ -1,0 +1,33 @@
+{
+  "data_dir": "/ABSOLUTE/PATH/TO/POLARIS_HOME",
+  "providers": {
+    "foundry-router": {
+      "kind": "foundry_router",
+      "model": "model-router",
+      "base_url": "https://YOUR-RESOURCE.services.ai.azure.com/openai/v1",
+      "api_key_env": "AZURE_FOUNDRY_API_KEY",
+      "api_mode": "responses",
+      "timeout_seconds": 60.0,
+      "headers": {},
+      "azure_auth": "api_key"
+    }
+  },
+  "tools": {
+    "roots": [
+      "/ABSOLUTE/PATH/TO/WORKSPACE"
+    ],
+    "allow_private_http": false
+  },
+  "daemon": {
+    "host": "127.0.0.1",
+    "port": 8765,
+    "token_file": "/ABSOLUTE/PATH/TO/POLARIS_HOME/api-token",
+    "graceful_timeout_seconds": 30.0
+  },
+  "workers": [],
+  "offline": {
+    "enabled": false,
+    "allowed_hosts": [],
+    "allow_private_ips": true
+  }
+}

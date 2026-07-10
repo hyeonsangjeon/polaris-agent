@@ -1,0 +1,64 @@
+{
+  "upstream": {
+    "repository": "https://github.com/NousResearch/hermes-agent",
+    "revision": "b9b463f3bd6517b76687d9b3c9dea1e62f01f9e1",
+    "license": "MIT",
+    "copyright": "Copyright (c) 2025 Nous Research"
+  },
+  "ports": [
+    {
+      "source": "providers/base.py",
+      "destination": "src/polaris/providers/base.py",
+      "classification": "adapted",
+      "modifications": [
+        "Reduced the provider profile to Polaris capabilities and API modes",
+        "Added immutable normalized message, tool-call, usage, and completion contracts",
+        "Added strict registry collision handling and secret-safe configuration repr"
+      ],
+      "tests": [
+        "tests/unit/test_provider_registry.py",
+        "tests/provider_contract/test_providers.py"
+      ]
+    },
+    {
+      "source": "plugins/model-providers/azure-foundry/__init__.py",
+      "destination": "src/polaris/providers/azure_foundry.py",
+      "classification": "adapted",
+      "modifications": [
+        "Converted declarative plugin metadata into a concrete async provider",
+        "Added static API-key and per-request Entra authentication",
+        "Shared the normalized Chat Completions and Responses transport"
+      ],
+      "tests": [
+        "tests/provider_contract/test_providers.py"
+      ]
+    },
+    {
+      "source": "agent/azure_identity_adapter.py",
+      "destination": "src/polaris/providers/azure_identity.py",
+      "classification": "adapted",
+      "modifications": [
+        "Removed Hermes lazy dependency installation and dashboard helpers",
+        "Retained lazy azure-identity import and cached DefaultAzureCredential",
+        "Exposed both Foundry and classic Cognitive Services token scopes"
+      ],
+      "tests": [
+        "tests/provider_contract/test_providers.py"
+      ]
+    },
+    {
+      "source": "tools/registry.py",
+      "destination": "src/polaris/tools/registry.py",
+      "classification": "adapted",
+      "modifications": [
+        "Reduced plugin and MCP-specific surfaces",
+        "Added typed async handlers and journal-compatible safety classes",
+        "Retained thread-safe registration and last-good availability caching",
+        "Added explicit reconciliation handlers and result-size contracts"
+      ],
+      "tests": [
+        "tests/unit/test_tool_registry.py"
+      ]
+    }
+  ]
+}

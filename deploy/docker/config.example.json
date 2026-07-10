@@ -1,0 +1,25 @@
+{
+  "daemon": {
+    "graceful_timeout_seconds": 30.0,
+    "host": "0.0.0.0",
+    "port": 8765,
+    "token_file": "/data/api-token"
+  },
+  "data_dir": "/data",
+  "providers": {
+    "ollama": {
+      "api_mode": "chat_completions",
+      "base_url": "http://host.docker.internal:11434",
+      "headers": {},
+      "kind": "ollama",
+      "model": "llama3.2",
+      "timeout_seconds": 30.0
+    }
+  },
+  "tools": {
+    "allow_private_http": false,
+    "roots": [
+      "/workspace"
+    ]
+  }
+}

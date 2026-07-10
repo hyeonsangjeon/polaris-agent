@@ -1,0 +1,24 @@
+{
+  "question": "Compare the durability risks in this repository.",
+  "workers": [
+    {
+      "provider": "ollama",
+      "role": "recovery"
+    },
+    {
+      "provider": "ollama",
+      "role": "security"
+    },
+    {
+      "provider": "ollama",
+      "role": "operations"
+    }
+  ],
+  "verifier": "ollama",
+  "synthesizer": "ollama",
+  "budget": {
+    "call_limit": 24,
+    "token_limit": 32000,
+    "wall_seconds_limit": 900.0
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "data_dir": "/ABSOLUTE/PATH/TO/POLARIS_HOME",
+  "providers": {
+    "ollama": {
+      "kind": "ollama",
+      "model": "llama3.2",
+      "base_url": "http://127.0.0.1:11434",
+      "api_mode": "chat_completions",
+      "timeout_seconds": 30.0,
+      "headers": {}
+    }
+  },
+  "tools": {
+    "roots": [
+      "/ABSOLUTE/PATH/TO/WORKSPACE"
+    ],
+    "allow_private_http": false
+  },
+  "daemon": {
+    "host": "127.0.0.1",
+    "port": 8765,
+    "token_file": "/ABSOLUTE/PATH/TO/POLARIS_HOME/api-token",
+    "graceful_timeout_seconds": 30.0
+  },
+  "workers": [
+    {
+      "provider": "ollama",
+      "role": "recovery",
+      "instructions": "Inspect recovery behavior and cite repository evidence."
+    },
+    {
+      "provider": "ollama",
+      "role": "security",
+      "instructions": "Inspect security boundaries and cite repository evidence."
+    },
+    {
+      "provider": "ollama",
+      "role": "operations",
+      "instructions": "Inspect operational risks and cite repository evidence."
+    }
+  ],
+  "verifier": "ollama",
+  "synthesizer": "ollama",
+  "offline": {
+    "enabled": true,
+    "allowed_hosts": [],
+    "allow_private_ips": false
+  }
+}

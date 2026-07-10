@@ -1,0 +1,60 @@
+name: Setup help
+description: Ask for help with Ollama, Foundry, the daemon, desktop, or Docker setup.
+title: "[Setup]: "
+labels: ["setup", "needs-triage"]
+body:
+  - type: dropdown
+    id: path
+    attributes:
+      label: Setup path
+      options:
+        - Ollama local
+        - Foundry Model Router with API key
+        - Foundry Model Router with Entra
+        - macOS launchd
+        - Tauri macOS console
+        - Docker / NAS-adjacent
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Docker Desktop
+        - NAS / other
+    validations:
+      required: true
+  - type: textarea
+    id: commands
+    attributes:
+      label: Commands run
+      description: Redact absolute private paths and all secrets.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Redacted `polaris doctor --json`
+      render: json
+  - type: textarea
+    id: error
+    attributes:
+      label: Error and current behavior
+    validations:
+      required: true
+  - type: textarea
+    id: docs
+    attributes:
+      label: Documentation already tried
+      placeholder: "README section or documentation URL"
+  - type: checkboxes
+    id: redaction
+    attributes:
+      label: Redaction
+      options:
+        - label: I removed API keys, daemon tokens, prompts, private paths, and sensitive artifact content.
+          required: true

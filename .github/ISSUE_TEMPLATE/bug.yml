@@ -1,0 +1,92 @@
+name: Bug report
+description: Report reproducible incorrect behavior or recovery semantics.
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Remove tokens, keys, prompts, private paths, and artifact contents. Security vulnerabilities belong in a private advisory.
+  - type: input
+    id: version
+    attributes:
+      label: Polaris version or commit
+      placeholder: "0.1.0 or commit SHA"
+    validations:
+      required: true
+  - type: input
+    id: run-id
+    attributes:
+      label: Run ID
+      description: Include when the bug concerns a run; IDs are not secrets but related data may be.
+      placeholder: "run_… or N/A"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Docker / NAS-adjacent
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Redacted `polaris doctor --json`
+      description: Remove endpoints, hostnames, usernames, keys, tokens, prompts, and private model names.
+      render: json
+    validations:
+      required: true
+  - type: dropdown
+    id: recovery-step
+    attributes:
+      label: Recovery step
+      description: Where in the lifecycle was the problem observed?
+      options:
+        - Initial run
+        - Daemon shutdown or process kill
+        - Lease expiry
+        - Automatic daemon-start recovery
+        - Manual resume
+        - Approval or uncertainty decision
+        - Replay
+        - Not recovery-related
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Include commands and timing, but replace sensitive values.
+    validations:
+      required: true
+  - type: textarea
+    id: timeline
+    attributes:
+      label: Redacted event or timeline excerpt
+      description: Include only the smallest relevant range.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I removed daemon tokens and provider credentials.
+          required: true
+        - label: This is not a private security vulnerability.
+          required: true

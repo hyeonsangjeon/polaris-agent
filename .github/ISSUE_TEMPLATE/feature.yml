@@ -1,0 +1,57 @@
+name: Feature request
+description: Propose a behavior with explicit safety and recovery semantics.
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the operator problem without prescribing an implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Desired observable behavior
+      description: What should the operator see before, during, and after the operation?
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Relevant mode
+      options:
+        - Single
+        - Fan-out
+        - Foundry Router
+        - Daemon / API
+        - Desktop console
+        - Deployment
+        - All / not mode-specific
+    validations:
+      required: true
+  - type: textarea
+    id: crash
+    attributes:
+      label: Crash and recovery semantics
+      description: What happens if the process dies before intent, during execution, or before commit?
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security, approval, and data considerations
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: honesty
+    attributes:
+      label: Contract
+      options:
+        - label: This request does not rely on arbitrary exactly-once execution.
+          required: true

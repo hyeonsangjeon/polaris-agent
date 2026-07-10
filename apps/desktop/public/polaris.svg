@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Polaris compass">
+  <rect width="512" height="512" rx="112" fill="#10110e"/>
+  <circle cx="256" cy="256" r="162" fill="#283015" stroke="#b2bd3d" stroke-width="14"/>
+  <circle cx="256" cy="256" r="112" fill="#171a11" stroke="#55601f" stroke-width="8"/>
+  <path d="M256 110 280 232 402 256 280 280 256 402 232 280 110 256 232 232Z" fill="#b2bd3d"/>
+  <path d="m256 180 14 62 62 14-62 14-14 62-14-62-62-14 62-14Z" fill="#f0f2dc"/>
+</svg>
