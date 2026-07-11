@@ -13,8 +13,12 @@ __pycache__
 .env
 .env.*
 **/api-token
-**/*secret*
-**/*credentials*
+**/runtime-secrets.env
+**/*.secrets.env
+**/credentials.json
+**/*.credentials.json
+**/*.pem
+**/*.key
 .polaris-data
 workspace
 exports

@@ -521,6 +521,20 @@ async def test_approval_authorization_monitor_and_unknown_resolution(tmp_path: P
         env=env,
         telegram_adapter=adapter,
     )
+    message = OutboundMessage(
+        Platform.TELEGRAM,
+        "unknown-1",
+        "100",
+        "telegram:100",
+        "uncertain",
+    )
+    service.channel_store.enqueue_outbox(message)
+    claimed = service.channel_store.claim_outbox("operator", platform=Platform.TELEGRAM)
+    assert claimed is not None
+    service.channel_store.mark_outbox_unknown("unknown-1", "operator", "timeout")
+    assert service.unknown_outbox()[0].message.idempotency_key == "unknown-1"
+    assert service.mark_outbox_sent("unknown-1", note="verified remotely").status.value == "sent"
+
     run = await service.submit_single("approval", provider="fake", schedule=False)
     service.journal.mark_run_status(run.id, "running")
     approval = service.journal.request_approval(run.id, request={"tool": "write"})
@@ -556,20 +570,6 @@ async def test_approval_authorization_monitor_and_unknown_resolution(tmp_path: P
     )
     result = service.channel_store.ingest_envelope(unauthorized, {"callback": approval.id})
     assert not result.accepted
-
-    message = OutboundMessage(
-        Platform.TELEGRAM,
-        "unknown-1",
-        "100",
-        "telegram:100",
-        "uncertain",
-    )
-    service.channel_store.enqueue_outbox(message)
-    claimed = service.channel_store.claim_outbox("operator", platform=Platform.TELEGRAM)
-    assert claimed is not None
-    service.channel_store.mark_outbox_unknown("unknown-1", "operator", "timeout")
-    assert service.unknown_outbox()[0].message.idempotency_key == "unknown-1"
-    assert service.mark_outbox_sent("unknown-1", note="verified remotely").status.value == "sent"
     await service.close()
 
 

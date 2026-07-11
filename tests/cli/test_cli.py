@@ -204,6 +204,12 @@ def test_relative_secrets_override_and_daemon_token_env_use_data_dir(
     )
     save_config(config, config_file)
     monkeypatch.setenv("POLARIS_SECRETS_FILE", "private/runtime.env")
+    manager_type = cli_main.LaunchdServiceManager
+
+    def darwin_manager(**kwargs: Any) -> Any:
+        return manager_type(platform_system=lambda: "Darwin", **kwargs)
+
+    monkeypatch.setattr(cli_main, "LaunchdServiceManager", darwin_manager)
     state = State(config_file, None)
 
     assert cli_main._runtime_secrets_path(config) == data_dir / "private" / "runtime.env"

@@ -15,6 +15,13 @@ def test_dockerfile_is_locked_non_root_signal_safe_and_healthy() -> None:
     assert "api-token" not in dockerfile
 
 
+def test_dockerignore_keeps_runtime_secrets_out_without_dropping_source_modules() -> None:
+    dockerignore = (ROOT / ".dockerignore").read_text().splitlines()
+    assert "**/*secret*" not in dockerignore
+    assert "**/runtime-secrets.env" in dockerignore
+    assert (ROOT / "src" / "polaris" / "secrets.py").is_file()
+
+
 def test_compose_uses_local_state_loopback_and_container_hardening() -> None:
     compose = (ROOT / "compose.yaml").read_text()
     assert "127.0.0.1" in compose

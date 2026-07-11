@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from typing import Protocol, runtime_checkable
 
 from .models import ChannelAdapter, ChannelEnvelope, OutboundMessage, Platform
@@ -49,8 +49,9 @@ async def _lease_heartbeat(
         raise
     finally:
         task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
+        await asyncio.gather(task, return_exceptions=True)
+        if parent.cancelling() and failure is None:
+            raise asyncio.CancelledError
     if failure is not None:
         raise failure
 
