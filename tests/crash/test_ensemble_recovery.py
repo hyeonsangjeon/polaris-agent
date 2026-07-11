@@ -15,6 +15,10 @@ from polaris.runtime import RuntimeConfig
 from polaris.tools import ToolRegistry
 from polaris.tools.registry import JsonValue
 
+LEASE_SECONDS = 0.2
+LEASE_EXPIRY_WAIT = 0.3
+SLOW_PROVIDER_DELAY = 0.6
+
 
 def verification_json() -> str:
     quote = "an exact quote"
@@ -35,7 +39,7 @@ class CrashProvider(Provider):
         self.config = ProviderConfig(
             model=f"requested-{kind}",
             base_url="http://localhost",
-            timeout_seconds=0.01,
+            timeout_seconds=LEASE_SECONDS,
         )
         self.calls: dict[str, int] = {}
         self.crashed = False
@@ -83,7 +87,7 @@ def runtime_config(worker: WorkerSpec) -> RuntimeConfig:
     return RuntimeConfig(
         system_prompt=worker.role,
         worker_id=f"worker-{worker.id}",
-        lease_seconds=0.01,
+        lease_seconds=LEASE_SECONDS,
         reservation_tokens=50,
     )
 
@@ -128,7 +132,7 @@ async def test_resume_only_recoverable_worker_and_skip_committed_worker(tmp_path
     with pytest.raises(ExceptionGroup):
         await engine.execute(run.id)
     assert journal.get_run(run.id).status is RunStatus.RUNNING
-    await asyncio.sleep(0.02)
+    await asyncio.sleep(LEASE_EXPIRY_WAIT)
 
     result = await engine.execute(run.id)
     assert result.report
@@ -169,10 +173,10 @@ async def test_crash_after_verifier_commit_does_not_rerun_verifier(tmp_path: Pat
     assert synthesis.status is StepStatus.EXECUTING
     assert synthesis.lease_expires_at is not None
     assert run.config["provider_lease_seconds"] == {
-        "verify": 0.01,
-        "synth": 0.01,
+        "verify": LEASE_SECONDS,
+        "synth": LEASE_SECONDS,
     }
-    await asyncio.sleep(0.02)
+    await asyncio.sleep(LEASE_EXPIRY_WAIT)
     journal.reclaim_expired_leases()
 
     result = await engine.execute(run.id)
@@ -195,7 +199,7 @@ async def test_slow_ensemble_provider_call_keeps_lease_alive(tmp_path: Path) -> 
         tools: Sequence[Mapping[str, JsonValue]] | None = None,
         response_schema: Mapping[str, JsonValue] | None = None,
     ) -> CompletionResult:
-        await asyncio.sleep(0.04)
+        await asyncio.sleep(SLOW_PROVIDER_DELAY)
         return await original_complete(messages, tools, response_schema)
 
     verifier.complete = slow_complete  # type: ignore[method-assign]

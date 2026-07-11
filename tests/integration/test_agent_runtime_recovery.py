@@ -18,6 +18,9 @@ from polaris.runtime import AgentRuntime, DefaultApprovalPolicy, RuntimeConfig
 from polaris.tools import SafetyClass, ToolEntry, ToolRegistry
 from polaris.tools.registry import JsonValue
 
+LEASE_SECONDS = 0.2
+LEASE_EXPIRY_WAIT = 0.3
+
 
 class RecoveryProvider(Provider):
     def __init__(self) -> None:
@@ -76,7 +79,7 @@ def make_agent(
         "fake",
         tools,
         RuntimeConfig(
-            lease_seconds=0.01,
+            lease_seconds=LEASE_SECONDS,
             approval_policy=DefaultApprovalPolicy(frozenset({"side_effect"})),
         ),
     )
@@ -101,7 +104,7 @@ async def test_read_only_tool_retries_after_expired_executing_lease(
     run = agent.create_run("recover")
     with pytest.raises(SystemExit):
         await agent.execute(run.id)
-    sleep(0.02)
+    sleep(LEASE_EXPIRY_WAIT)
     assert run.id in agent.recover()
     result = await agent.execute(run.id)
 
@@ -140,7 +143,7 @@ async def test_reconcilable_tool_reconcile_avoids_duplicate_execute(
     run = agent.create_run("recover")
     with pytest.raises(SystemExit):
         await agent.execute(run.id)
-    sleep(0.02)
+    sleep(LEASE_EXPIRY_WAIT)
     result = await agent.execute(run.id)
 
     assert result.status is RunStatus.COMPLETED
@@ -179,7 +182,7 @@ async def test_opaque_executing_crash_becomes_uncertain_and_pauses(
     run = agent.create_run("recover")
     with pytest.raises(SystemExit):
         await agent.execute(run.id)
-    sleep(0.02)
+    sleep(LEASE_EXPIRY_WAIT)
     result = await agent.execute(run.id)
 
     tool_step = next(step for step in journal.list_steps(run.id) if step.kind == "tool")
@@ -219,7 +222,7 @@ async def test_opaque_retry_crashing_twice_requires_fresh_approval(
 
     with pytest.raises(SystemExit):
         await agent.execute(run.id)
-    sleep(0.02)
+    sleep(LEASE_EXPIRY_WAIT)
     first_pause = await agent.execute(run.id)
     first_approval = journal.list_pending_approvals(run.id)[0]
     assert first_pause.status is RunStatus.PAUSED
@@ -227,7 +230,7 @@ async def test_opaque_retry_crashing_twice_requires_fresh_approval(
 
     with pytest.raises(SystemExit):
         await agent.execute(run.id)
-    sleep(0.02)
+    sleep(LEASE_EXPIRY_WAIT)
     second_pause = await agent.execute(run.id)
     second_approval = journal.list_pending_approvals(run.id)[0]
     assert second_pause.status is RunStatus.PAUSED
