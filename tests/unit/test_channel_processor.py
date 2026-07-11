@@ -20,6 +20,9 @@ from polaris.channels import (
 from polaris.channels.store import ChannelStore
 from polaris.journal import Journal
 
+HEARTBEAT_LEASE_SECONDS = 1.0
+HEARTBEAT_OBSERVATION_SECONDS = 2.5
+
 
 class DurableOrderAdapter:
     def __init__(self, store: ChannelStore) -> None:
@@ -174,11 +177,11 @@ async def test_inbox_heartbeat_keeps_slow_handler_lease(tmp_path: Path) -> None:
         slow_handler,
         owner="slow-worker",
         platform=Platform.TELEGRAM,
-        lease_seconds=0.06,
+        lease_seconds=HEARTBEAT_LEASE_SECONDS,
     )
     processing = asyncio.create_task(processor.process_inbox_once())
     await started.wait()
-    await asyncio.sleep(0.15)
+    await asyncio.sleep(HEARTBEAT_OBSERVATION_SECONDS)
     contender = ChannelStore(path)
     assert contender.recover_inbox_leases() == 0
     assert contender.claim_inbox("contender", platform=Platform.TELEGRAM) is None
@@ -216,11 +219,11 @@ async def test_outbox_heartbeat_keeps_slow_send_lease(tmp_path: Path) -> None:
         lambda _envelope: pytest.fail("inbox handler must not run"),
         owner="slow-worker",
         platform=Platform.TELEGRAM,
-        lease_seconds=0.06,
+        lease_seconds=HEARTBEAT_LEASE_SECONDS,
     )
     sending = asyncio.create_task(processor.send_outbox_once())
     await started.wait()
-    await asyncio.sleep(0.15)
+    await asyncio.sleep(HEARTBEAT_OBSERVATION_SECONDS)
     contender = ChannelStore(path)
     assert contender.recover_outbox_leases() == 0
     assert contender.claim_outbox("contender", platform=Platform.TELEGRAM) is None

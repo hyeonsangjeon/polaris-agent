@@ -312,8 +312,8 @@ def test_expired_owner_cannot_act(tmp_path: Path) -> None:
     with Journal(tmp_path / "journal.sqlite3") as journal:
         run_id = make_run(journal)
         step = journal.create_step(run_id, "tool", "read", {}, SafetyClass.READ_ONLY)
-        journal.claim_ready_step("worker", 0.01)
-        sleep(0.02)
+        journal.claim_ready_step("worker", 2.0)
+        sleep(2.5)
         with pytest.raises(LeaseExpiredError):
             journal.heartbeat(step.id, "worker", 30)
 

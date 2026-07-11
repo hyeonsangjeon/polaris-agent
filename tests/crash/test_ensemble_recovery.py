@@ -15,9 +15,9 @@ from polaris.runtime import RuntimeConfig
 from polaris.tools import ToolRegistry
 from polaris.tools.registry import JsonValue
 
-LEASE_SECONDS = 0.2
-LEASE_EXPIRY_WAIT = 0.3
-SLOW_PROVIDER_DELAY = 0.6
+LEASE_SECONDS = 2.0
+LEASE_EXPIRY_WAIT = 2.5
+SLOW_PROVIDER_DELAY = 5.0
 
 
 def verification_json() -> str:

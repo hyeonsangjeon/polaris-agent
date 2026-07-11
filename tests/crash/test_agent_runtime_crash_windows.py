@@ -17,6 +17,9 @@ from polaris.runtime import (
 from polaris.tools import SafetyClass, ToolEntry, ToolRegistry
 from polaris.tools.registry import JsonValue
 
+LEASE_SECONDS = 2.0
+LEASE_EXPIRY_WAIT = 2.5
+
 
 class CountingProvider(Provider):
     def __init__(self) -> None:
@@ -50,7 +53,7 @@ def setup(tmp_path: Path) -> tuple[Journal, CountingProvider, AgentRuntime, str]
         provider,
         "fake",
         ToolRegistry(),
-        RuntimeConfig(lease_seconds=0.01),
+        RuntimeConfig(lease_seconds=LEASE_SECONDS),
     )
     run = runtime.create_run("window")
     journal.mark_run_status(run.id, RunStatus.RUNNING)
@@ -113,10 +116,10 @@ async def test_expired_executing_model_step_is_retried(tmp_path: Path) -> None:
         "read_only",
         sequence=0,
     )
-    claimed = journal.claim_ready_step("crashed-worker", 0.01, run_id)
+    claimed = journal.claim_ready_step("crashed-worker", LEASE_SECONDS, run_id)
     assert claimed is not None
     journal.mark_executing(step.id, "crashed-worker")
-    sleep(0.02)
+    sleep(LEASE_EXPIRY_WAIT)
 
     result = await runtime.execute(run_id)
 
@@ -197,7 +200,7 @@ async def test_tool_crash_windows(
         provider,
         "fake",
         tools,
-        RuntimeConfig(lease_seconds=0.01),
+        RuntimeConfig(lease_seconds=LEASE_SECONDS),
     )
     run = runtime.create_run("tool window")
     journal.mark_run_status(run.id, RunStatus.RUNNING)
@@ -240,10 +243,10 @@ async def test_tool_crash_windows(
         sequence=1,
     )
     if window in {"executing", "committed"}:
-        assert journal.claim_ready_step("tool-worker", 0.01, run.id) is not None
+        assert journal.claim_ready_step("tool-worker", LEASE_SECONDS, run.id) is not None
         journal.mark_executing(tool.id, "tool-worker")
     if window == "executing":
-        sleep(0.02)
+        sleep(LEASE_EXPIRY_WAIT)
     elif window == "committed":
         journal.commit_step(
             tool.id,

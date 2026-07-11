@@ -18,8 +18,8 @@ from polaris.runtime import AgentRuntime, DefaultApprovalPolicy, RuntimeConfig
 from polaris.tools import SafetyClass, ToolEntry, ToolRegistry
 from polaris.tools.registry import JsonValue
 
-LEASE_SECONDS = 0.2
-LEASE_EXPIRY_WAIT = 0.3
+LEASE_SECONDS = 2.0
+LEASE_EXPIRY_WAIT = 2.5
 
 
 class RecoveryProvider(Provider):
