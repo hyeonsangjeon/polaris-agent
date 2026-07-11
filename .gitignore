@@ -16,6 +16,7 @@ dist/
 build/
 node_modules/
 apps/desktop/dist/
+apps/desktop/release/
 apps/desktop/src-tauri/target/
 .polaris/
 *.db

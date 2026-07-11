@@ -202,6 +202,7 @@ class BackupManager:
         config_file: Path | None = None,
         journal_file: Path | None = None,
         artifact_dir: Path | None = None,
+        secrets_file: Path | None = None,
     ) -> None:
         self.data_dir = data_dir.expanduser().resolve()
         self.config_file = (
@@ -218,6 +219,11 @@ class BackupManager:
             artifact_dir.expanduser().resolve()
             if artifact_dir is not None
             else self.data_dir / "artifacts"
+        )
+        self.secrets_file = (
+            secrets_file.expanduser().resolve()
+            if secrets_file is not None
+            else self.data_dir / "runtime-secrets.env"
         )
         self._restore_marker = self.data_dir.parent / (
             f".{self.data_dir.name}.restore-transaction.json"
@@ -301,7 +307,7 @@ class BackupManager:
                 shutil.rmtree(workspace, ignore_errors=True)
 
     def _stage_config(self, destination: Path) -> None:
-        if self.config_file.exists():
+        if self.config_file.exists() and not self._is_secrets_file(self.config_file):
             try:
                 raw = json.loads(self.config_file.read_text(encoding="utf-8"))
             except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -317,7 +323,7 @@ class BackupManager:
     def _snapshot_database(self, destination: Path) -> None:
         target = sqlite3.connect(destination)
         try:
-            if self.journal_file.exists():
+            if self.journal_file.exists() and not self._is_secrets_file(self.journal_file):
                 source = sqlite3.connect(f"file:{self.journal_file}?mode=ro", uri=True, timeout=30)
                 try:
                     source.backup(target)
@@ -337,6 +343,8 @@ class BackupManager:
         for source in sorted(self.artifact_dir.rglob("*")):
             if source.is_symlink():
                 raise BackupError(f"artifact symlinks are not supported: {source}")
+            if self._is_secrets_file(source):
+                continue
             relative = source.relative_to(self.artifact_dir)
             target = destination / relative
             if source.is_dir():
@@ -348,6 +356,14 @@ class BackupManager:
                 target.chmod(0o600)
             else:
                 raise BackupError(f"unsupported artifact type: {source}")
+
+    def _is_secrets_file(self, path: Path) -> bool:
+        if path.resolve() == self.secrets_file:
+            return True
+        try:
+            return path.samefile(self.secrets_file)
+        except FileNotFoundError:
+            return False
 
     @staticmethod
     def _manifest_files(state: Path) -> list[dict[str, object]]:
@@ -873,12 +889,14 @@ def export_backup(
     config_file: Path | None = None,
     journal_file: Path | None = None,
     artifact_dir: Path | None = None,
+    secrets_file: Path | None = None,
 ) -> BackupReport:
     return BackupManager(
         data_dir=data_dir,
         config_file=config_file,
         journal_file=journal_file,
         artifact_dir=artifact_dir,
+        secrets_file=secrets_file,
     ).export(destination, passphrase)
 
 
@@ -890,6 +908,7 @@ def import_backup(
     config_file: Path | None = None,
     journal_file: Path | None = None,
     artifact_dir: Path | None = None,
+    secrets_file: Path | None = None,
     force: bool = False,
 ) -> BackupReport:
     return BackupManager(
@@ -897,4 +916,5 @@ def import_backup(
         config_file=config_file,
         journal_file=journal_file,
         artifact_dir=artifact_dir,
+        secrets_file=secrets_file,
     ).import_archive(source, passphrase, force=force)

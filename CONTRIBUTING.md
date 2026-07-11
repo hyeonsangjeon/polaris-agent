@@ -29,6 +29,12 @@ For Entra-specific development:
 uv sync --dev --extra azure
 ```
 
+For the complete Python test matrix, including Telegram and Slack imports:
+
+```bash
+uv sync --dev --all-extras
+```
+
 ## Exact checks
 
 Python:
@@ -68,6 +74,10 @@ Documentation/example validation:
 
 ```bash
 uv run python -m json.tool examples/config.ollama.json >/dev/null
+uv run python -m json.tool examples/config.ollama-harness.json >/dev/null
+uv run python -m json.tool examples/config.telegram.json >/dev/null
+uv run python -m json.tool examples/config.slack.json >/dev/null
+uv run python -m json.tool examples/scheduled-job.request.json >/dev/null
 uv run python -m json.tool examples/config.foundry-router-key.json >/dev/null
 uv run python -m json.tool examples/config.foundry-router-entra.json >/dev/null
 uv run python scripts/demo/create_fixture.py --output .demo-check

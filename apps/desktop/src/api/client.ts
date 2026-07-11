@@ -4,9 +4,21 @@ import type {
   ConnectionConfig,
   FanoutRunInput,
   FoundryRunInput,
+  ChannelStatus,
+  Job,
+  JobCreateInput,
+  JobRun,
+  MemoryAddInput,
+  MemoryEntry,
+  MemoryHit,
+  MemoryRemoveInput,
+  MemoryReviseInput,
+  MemoryScope,
+  OutboxRecord,
   ProviderHealth,
   Replay,
   Run,
+  SchedulePreviewInput,
   SingleRunInput,
   Transport,
   TransportRequest,
@@ -48,7 +60,11 @@ export class PolarisClient {
     return new PolarisClient(config, this.#transport);
   }
 
-  async request<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+  async request<T>(
+    method: "GET" | "POST" | "PUT" | "DELETE",
+    path: string,
+    body?: unknown,
+  ): Promise<T> {
     const request: TransportRequest = { ...this.#config, method, path };
     if (body !== undefined) request.body = body;
     const response = await this.#transport(request);
@@ -88,6 +104,70 @@ export class PolarisClient {
     });
   resume = (id: string) => this.request<Run>("POST", `/v1/runs/${id}/resume`);
   cancel = (id: string) => this.request<Run>("POST", `/v1/runs/${id}/cancel`);
+  memory = (scope: MemoryScope, includeTombstones = false) =>
+    this.request<MemoryEntry[]>(
+      "GET",
+      query("/v1/memory", {
+        profile_id: scope.profile_id,
+        subject_key: scope.subject_key,
+        include_tombstones: includeTombstones,
+      }),
+    );
+  searchMemory = (scope: MemoryScope, search: string, limit = 50) =>
+    this.request<MemoryHit[]>(
+      "GET",
+      query("/v1/memory/search", {
+        query: search,
+        profile_id: scope.profile_id,
+        subject_key: scope.subject_key,
+        limit,
+      }),
+    );
+  addMemory = (body: MemoryAddInput) =>
+    this.request<MemoryEntry>("POST", "/v1/memory", body);
+  reviseMemory = (id: string, body: MemoryReviseInput) =>
+    this.request<MemoryEntry>("PUT", `/v1/memory/${encodeURIComponent(id)}`, body);
+  removeMemory = (id: string, body: MemoryRemoveInput) =>
+    this.request<MemoryEntry>("DELETE", `/v1/memory/${encodeURIComponent(id)}`, body);
+  previewJob = (body: SchedulePreviewInput) =>
+    this.request<string[]>("POST", "/v1/jobs/preview", body);
+  createJob = (body: JobCreateInput) => this.request<Job>("POST", "/v1/jobs", body);
+  jobs = () => this.request<Job[]>("GET", "/v1/jobs");
+  job = (id: string) => this.request<Job>("GET", `/v1/jobs/${encodeURIComponent(id)}`);
+  jobRuns = (id?: string) =>
+    this.request<JobRun[]>(
+      "GET",
+      id ? `/v1/jobs/${encodeURIComponent(id)}/runs` : "/v1/jobs/runs",
+    );
+  retryJobRun = (id: string) =>
+    this.request<JobRun>("POST", `/v1/jobs/runs/${encodeURIComponent(id)}/retry`);
+  pauseJob = (id: string) =>
+    this.request<Job>("POST", `/v1/jobs/${encodeURIComponent(id)}/pause`);
+  resumeJob = (id: string) =>
+    this.request<Job>("POST", `/v1/jobs/${encodeURIComponent(id)}/resume`);
+  cancelJob = (id: string) =>
+    this.request<Job>("POST", `/v1/jobs/${encodeURIComponent(id)}/cancel`);
+  channelStatus = () => this.request<ChannelStatus>("GET", "/v1/channels/status");
+  unknownOutbox = () =>
+    this.request<OutboxRecord[]>("GET", "/v1/channels/outbox/unknown");
+  markOutboxSent = (idempotencyKey: string, note: string) =>
+    this.request<OutboxRecord>(
+      "POST",
+      `/v1/channels/outbox/${encodeURIComponent(idempotencyKey)}/mark-sent`,
+      { note },
+    );
+  retryOutbox = (idempotencyKey: string, note: string) =>
+    this.request<OutboxRecord>(
+      "POST",
+      `/v1/channels/outbox/${encodeURIComponent(idempotencyKey)}/retry`,
+      { note },
+    );
+}
+
+function query(path: string, values: Record<string, string | number | boolean>) {
+  const params = new URLSearchParams();
+  Object.entries(values).forEach(([key, value]) => params.set(key, String(value)));
+  return `${path}?${params.toString()}`;
 }
 
 function normalizeProviders(value: Record<string, unknown>): ProviderHealth[] {

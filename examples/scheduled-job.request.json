@@ -1,0 +1,19 @@
+{
+  "name": "weekday-summary",
+  "schedule": {
+    "kind": "cron",
+    "cron": "0 9 * * 1-5",
+    "timezone": "Asia/Seoul"
+  },
+  "payload": {
+    "mode": "single",
+    "request": {
+      "prompt": "Summarize open work and include repository evidence.",
+      "provider": "ollama"
+    },
+    "delivery": null
+  },
+  "catchup_policy": "bounded",
+  "max_catchup": 3,
+  "grace_seconds": 0
+}

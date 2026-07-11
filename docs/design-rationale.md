@@ -62,6 +62,13 @@ fan-out worker and persists that selection. Foundry mode intentionally does the
 opposite: every stage targets the router deployment and Foundry chooses the
 underlying model. The two strategies are kept distinct to avoid hidden authority.
 
+The same principle shapes the v0.2 harness. Memory is curated rather than
+silently inferred, its profile/subject scope is bound outside model control, and
+every run freezes what it saw. Schedules persist local occurrence identity before
+dispatch and stop stale ambiguity instead of treating process restart as retry
+permission. Telegram and Slack are narrow private transports with
+two-dimensional allowlists, not new public control planes.
+
 [Hermes #34273](https://github.com/NousResearch/hermes-agent/issues/34273)
 requests customizable swarm verifier/synthesizer behavior. Polaris makes verifier
 and synthesizer providers explicit and enforces evidence/disagreement output
@@ -85,6 +92,16 @@ stable user configuration surface.
    semantics.
 8. **Prefer behavioral comparisons.** Polaris is a narrow runtime, not a claim
    that other agent frameworks are categorically unsafe.
+9. **Remember only by an explicit act.** Trust/provenance labels describe a
+   memory claim; they do not grant it instruction authority.
+10. **Separate trigger, execution, and delivery.** A due occurrence, a Polaris
+    run, and a channel send have different identities and failure states.
+11. **Deny remote input by two identities.** A recognized user in an unrecognized
+    conversation—and the reverse—does not pass channel policy.
 
-For the implemented contract, see [durability](durability.md) and
-[architecture](architecture.md).
+These choices use established concepts—curated memory, cron, transactional
+inboxes/outboxes, idempotency keys, and least-privilege allowlists—without
+copying another project's prose or presenting those concepts as novel. For the
+implemented contract, see [durability](durability.md),
+[architecture](architecture.md), [memory](memory.md), and
+[scheduler](scheduler.md).

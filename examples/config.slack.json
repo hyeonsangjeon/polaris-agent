@@ -1,0 +1,51 @@
+{
+  "data_dir": "/ABSOLUTE/PATH/TO/POLARIS_HOME",
+  "providers": {
+    "ollama": {
+      "kind": "ollama",
+      "model": "llama3.2",
+      "base_url": "http://127.0.0.1:11434"
+    }
+  },
+  "tools": {
+    "roots": [
+      "/ABSOLUTE/PATH/TO/WORKSPACE"
+    ],
+    "allow_private_http": false
+  },
+  "daemon": {
+    "host": "127.0.0.1",
+    "port": 8765,
+    "token_file": "/ABSOLUTE/PATH/TO/POLARIS_HOME/api-token",
+    "secrets_file": "/ABSOLUTE/PATH/TO/POLARIS_HOME/runtime-secrets.env"
+  },
+  "memory": {
+    "enabled": true,
+    "profile_id": "default",
+    "char_budget": 12000,
+    "tool_enabled": true
+  },
+  "scheduler": {
+    "enabled": true
+  },
+  "channels": {
+    "telegram": {
+      "enabled": false
+    },
+    "slack": {
+      "enabled": true,
+      "bot_token_env": "SLACK_BOT_TOKEN",
+      "app_token_env": "SLACK_APP_TOKEN",
+      "allowed_user_ids": [
+        "U0123456789"
+      ],
+      "allowed_channel_ids": [
+        "C0123456789"
+      ],
+      "default_provider": "ollama"
+    }
+  },
+  "offline": {
+    "enabled": false
+  }
+}

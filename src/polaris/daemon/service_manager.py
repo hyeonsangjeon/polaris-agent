@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from platform import system
 
+from polaris.secrets import SecretsFile, SecretsFileError
+
 LABEL = "com.hyeonsangjeon.polaris.daemon"
 PLIST_NAME = f"{LABEL}.plist"
 
@@ -55,6 +57,7 @@ class LaunchdServiceManager:
         home: Path | None = None,
         python_executable: str | None = None,
         provider_api_key_envs: Mapping[str, str] | None = None,
+        secrets_file: Path | None = None,
         platform_system: Callable[[], str] = system,
     ) -> None:
         if platform_system() != "Darwin":
@@ -73,6 +76,13 @@ class LaunchdServiceManager:
         self.home = (Path.home() if home is None else home).expanduser().resolve()
         self.python_executable = python_executable or sys.executable
         self.provider_api_key_envs = dict(provider_api_key_envs or {})
+        if secrets_file is None:
+            self.secrets_file = None
+        else:
+            expanded = secrets_file.expanduser()
+            self.secrets_file = (
+                expanded if expanded.is_absolute() else self.data_dir / expanded
+            ).absolute()
 
     @property
     def domain(self) -> str:
@@ -88,6 +98,9 @@ class LaunchdServiceManager:
 
     def plist_payload(self) -> dict[str, object]:
         logs = self.data_dir / "logs"
+        environment = {"POLARIS_HOME": str(self.data_dir)}
+        if self.secrets_file is not None:
+            environment["POLARIS_SECRETS_FILE"] = str(self.secrets_file)
         return {
             "Label": LABEL,
             "ProgramArguments": [
@@ -97,7 +110,7 @@ class LaunchdServiceManager:
                 "--config",
                 str(self.config_file),
             ],
-            "EnvironmentVariables": {"POLARIS_HOME": str(self.data_dir)},
+            "EnvironmentVariables": environment,
             "RunAtLoad": True,
             "KeepAlive": {"SuccessfulExit": False},
             "StandardOutPath": str(logs / "daemon.stdout.log"),
@@ -107,13 +120,32 @@ class LaunchdServiceManager:
         }
 
     def install(self) -> Path:
-        if self.provider_api_key_envs:
-            providers = ", ".join(sorted(self.provider_api_key_envs))
+        required = set(self.provider_api_key_envs.values())
+        if self.secrets_file is None:
+            missing = sorted(required)
+        else:
+            try:
+                missing = list(
+                    SecretsFile(self.secrets_file).check(
+                        required,
+                        missing_ok=not required,
+                    )
+                )
+            except SecretsFileError as exc:
+                if required:
+                    names = ", ".join(sorted(required))
+                    commands = "; ".join(
+                        f"polaris secrets set {name}" for name in sorted(required)
+                    )
+                    raise ServiceManagerError(
+                        f"{exc}. Required names: {names}. Run: {commands}"
+                    ) from exc
+                raise ServiceManagerError(str(exc)) from exc
+        if missing:
+            names = ", ".join(missing)
+            commands = "; ".join(f"polaris secrets set {name}" for name in missing)
             raise ServiceManagerError(
-                "launchd cannot inherit provider API-key environment variables "
-                f"(configured providers: {providers}). Run `polarisd` in the foreground, "
-                "or use Ollama, Entra/Managed Identity, or a future secure credential "
-                "integration."
+                f"runtime secrets file is missing required names: {names}. Run: {commands}"
             )
         self._write_plist()
         self._run("bootstrap", self.domain, str(self.plist_path))

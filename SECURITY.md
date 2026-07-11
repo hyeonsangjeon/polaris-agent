@@ -2,12 +2,12 @@
 
 ## Supported versions
 
-Polaris is alpha software. Security fixes are applied to the latest `0.1.x`
-release and the default branch only.
+Polaris is alpha software. Security fixes are applied to the latest release and
+the default branch only.
 
 | Version | Supported |
 |---|---|
-| Latest `0.1.x` | Yes |
+| Latest release | Yes |
 | Older versions | No |
 
 ## Report a vulnerability
@@ -37,9 +37,18 @@ availability during the alpha.
   requires approval by default. Review every command and working directory.
 - **Desktop:** the Tauri app is an independent authenticated client of the daemon,
   not a sandbox or privilege boundary.
-- **Tokens and provider secrets:** setup writes the daemon token with private file
-  permissions. Provider JSON stores environment-variable names only. Backups
-  exclude credentials and the API token.
+- **Memory:** curated memory is scoped and threat-scanned but remains untrusted
+  model-visible data. Writes are explicit; never store credentials in memory.
+- **Schedules:** catch-up and stale-run retry can repeat work. Interrupted
+  scheduled occurrences require an explicit retry.
+- **Channels:** Telegram long polling and Slack Socket Mode deny by default
+  unless both sender and destination are allowlisted. Remote approval has the
+  same authority as local approval. Unknown send outcomes are not blindly
+  retried.
+- **Tokens and provider/channel secrets:** setup writes the daemon token with
+  private permissions. JSON stores environment-variable names only. The strict
+  owner-only runtime secrets file is excluded from backups along with
+  credentials and the API token.
 - **Recovery:** an ambiguous opaque effect stops for a decision. Approval to retry
   can duplicate an effect; Polaris does not promise arbitrary exactly-once
   execution.
@@ -49,9 +58,12 @@ availability during the alpha.
 Before sharing `doctor`, logs, timelines, configuration, or artifacts:
 
 1. Replace bearer tokens and every provider/API credential.
-2. Remove environment values; leave only variable names.
-3. Review prompts, model outputs, tool arguments, file paths, URLs, and evidence.
-4. Remove hostnames, IP addresses, usernames, and workspace content if sensitive.
-5. Prefer the minimum event range needed to reproduce the problem.
+2. Remove environment/runtime-secret values; leave only variable names.
+3. Review prompts, model outputs, memory content/provenance, scheduled payloads,
+   tool arguments, file paths, URLs, and evidence.
+4. Remove Telegram/Slack message text, workspace names, usernames, user/chat/
+   channel IDs, hostnames, and IP addresses when they are not needed.
+5. Run, job, job-run, and channel event IDs are not credentials, but can link to
+   sensitive records; share only the IDs and event range needed to reproduce.
 
 See [docs/security.md](docs/security.md) for the full threat model.

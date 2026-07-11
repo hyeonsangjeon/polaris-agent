@@ -33,6 +33,11 @@ An activated evaluator has:
 4. restarted or killed the daemon in a disposable recovery drill; and
 5. replayed a completed result or observed an honest uncertainty stop.
 
+For v0.2 harness evaluation, an operator may instead complete one scoped memory
+write/search, preview and trigger a disposable schedule, or round-trip a command
+through an allowlisted test chat. These are reported separately; configuring a
+channel is never required for basic activation.
+
 No analytics are added to the product. Measure only voluntary, aggregate GitHub
 signals and opt-in issue/discussion responses.
 
@@ -109,6 +114,8 @@ not merely more views.
 - Label good first documentation/reproduction tasks.
 - Time a clean contributor setup using the exact commands in `CONTRIBUTING.md`.
 - Review issue forms for redaction and recovery context.
+- Exercise memory scope isolation, missed-schedule policy, and channel
+  reconnect/deduplication with disposable identities and redacted fixtures.
 - Triage any security reports before additional promotion.
 
 **Target:** two external issue reports with complete reproduction context or one
@@ -123,6 +130,7 @@ Record:
 - quickstart completion rate;
 - first-response and fix time;
 - misleading-claim reports;
+- memory/scheduler/channel setup completion and duplicate-delivery reports;
 - unresolved security/high-severity bugs; and
 - maintainer hours.
 

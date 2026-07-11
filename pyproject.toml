@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "polaris-agent-runtime"
-version = "0.1.0"
+version = "0.2.0"
 description = "A durable local agent runtime with auditable ensemble research."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -43,6 +43,10 @@ dependencies = [
 
 [project.optional-dependencies]
 azure = ["azure-identity>=1.25,<2"]
+channels = [
+    "aiohttp>=3.12,<4",
+    "slack-sdk>=3.39,<4",
+]
 
 [project.scripts]
 polaris = "polaris.cli.main:main"

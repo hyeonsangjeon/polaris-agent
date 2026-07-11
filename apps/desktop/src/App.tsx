@@ -7,9 +7,12 @@ import { loadPendingApprovals } from "./hooks/useRunBundle";
 import { usePolling } from "./hooks/usePolling";
 import { ApprovalsView } from "./views/ApprovalsView";
 import { EvidenceView } from "./views/EvidenceView";
+import { ChannelsView } from "./views/ChannelsView";
+import { MemoryView } from "./views/MemoryView";
 import { NewRunView } from "./views/NewRunView";
 import { OverviewView } from "./views/OverviewView";
 import { RunDetailView } from "./views/RunDetailView";
+import { SchedulesView } from "./views/SchedulesView";
 import { SettingsView } from "./views/SettingsView";
 import "./App.css";
 
@@ -45,6 +48,8 @@ export default function App({
   );
   const providers = usePolling(() => client.providers(), { intervalMs: 12000 });
   const approvals = usePolling(() => loadPendingApprovals(client), { intervalMs: 5000 });
+  const jobs = usePolling(() => client.jobs(), { intervalMs: 12_000 });
+  const channels = usePolling(() => client.channelStatus(), { intervalMs: 12_000 });
 
   const openRun = (id: string) => {
     setSelectedRun(id);
@@ -79,6 +84,8 @@ export default function App({
           onSelectRun={openRun}
           onNewRun={() => setView("new-run")}
           pendingApprovals={approvals.data ?? []}
+          scheduledJobs={jobs.data ?? []}
+          channelStatus={channels.data}
         />
       )}
       {view === "new-run" && (
@@ -93,6 +100,11 @@ export default function App({
       )}
       {view === "evidence" && <EvidenceView client={client} runId={selectedRun} />}
       {view === "approvals" && <ApprovalsView client={client} onSelectRun={openRun} />}
+      {view === "memory" && <MemoryView client={client} demo={demo} />}
+      {view === "schedules" && (
+        <SchedulesView client={client} providers={providers.data ?? []} demo={demo} />
+      )}
+      {view === "channels" && <ChannelsView client={client} demo={demo} />}
       {view === "settings" && (
         <SettingsView connection={connection} onSave={setConnection} client={client} />
       )}

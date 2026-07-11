@@ -1,6 +1,7 @@
 # Polaris Agent
 
-**Keep local and routed agent work recoverable, inspectable, and under operator control when the process disappears.**
+**Give a model useful hands without giving up the operator's memory, schedule,
+or recovery boundary.**
 
 [![CI](https://github.com/hyeonsangjeon/polaris-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/hyeonsangjeon/polaris-agent/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/hyeonsangjeon/polaris-agent/actions/workflows/codeql.yml/badge.svg)](https://github.com/hyeonsangjeon/polaris-agent/actions/workflows/codeql.yml)
@@ -10,29 +11,26 @@
 
 ![Polaris Agent desktop console showing a durable run timeline, budget, and artifacts](docs/assets/desktop-overview.png)
 
-Polaris is a local-first Python runtime (`polaris`, `polarisd`) with an independent
-Tauri macOS operator console. It runs one agent, a bounded local Ollama fan-out, or
-a thin Microsoft Foundry Model Router strategy while keeping a SQLite journal,
-evidence artifacts, budgets, approvals, and deterministic replay.
+Polaris is a local-first harness around Ollama or Microsoft Foundry Model
+Router. The model reasons; explicit filesystem, HTTP, and shell tools are its OS
+hands. A SQLite journal keeps work recoverable, curated memory keeps operator
+context scoped, and durable cron plus allowlisted Telegram/Slack connections
+bring the same approval boundary to unattended work. The CLI and independent
+macOS console remain clients of one local daemon.
 
 > **Alpha:** use a disposable workspace first. Polaris deliberately stops when an
 > opaque side effect may have happened but cannot be proven.
 
 [한국어 요약과 빠른 시작 →](docs/korean/README.md)
 
-## The 30-second story
+## The harness in one minute
 
-1. Start **K Ollama workers** with different roles.
-2. Kill the daemon during the run.
-3. Restart it: committed work stays committed, active leases are respected, and
-   only expired recoverable work resumes.
-4. The verifier preserves disagreements instead of hiding them.
-5. Optionally send resolution work through a Foundry `model-router` deployment;
-   Foundry—not Polaris—chooses and fails over between underlying models.
-6. Replay the completed record and hashed artifacts without calling a model again.
-
-This is a failure-semantics story, not a claim that live web research finishes in
-30 seconds.
+Ask a local or routed model to work inside explicit tool roots. Polaris records
+intent before execution, pauses ambiguous effects for approval, and reuses
+committed work after restart. Each run sees a frozen, scoped memory snapshot.
+Optional schedules create runs later; optional private channel connections carry
+commands, approval requests, and final results without exposing a public webhook.
+Replay reads the record without calling the model or tools again.
 
 ## Why not another agent framework?
 
@@ -45,6 +43,7 @@ the behavior after interruption matters as much as the happy path.
 | Ambiguous write | Often retry or fail | Reconcile when supported; otherwise pause for a person |
 | Multi-worker result | Collect text | Validate evidence, record disagreement, emit hashed artifacts |
 | Model routing | Application selects a model | Local fan-out is explicit; Foundry Router delegates selection to its deployment |
+| Remember and return | Ad hoc prompt history | Curated scoped memory, durable schedules, and allowlisted private channels |
 | Audit | Logs | Runs, events, calls, approvals, budgets, receipts, and artifacts |
 | Revisit result | Rerun providers/tools | Replay committed records without execution |
 
@@ -73,11 +72,8 @@ uv run polarisd
 
 The foreground daemon stops when that terminal closes. On macOS, install it as a
 launchd user service instead with `uv run polaris daemon install`, then
-`uv run polaris daemon start`. LaunchAgent installation is supported only when
-providers do not use `api_key_env`: launchd does not inherit shell API-key
-variables, and Polaris never copies secrets into its plist. Run API-key providers
-in the foreground, or use Ollama, Entra/Managed Identity, or a future secure
-credential integration.
+`uv run polaris daemon start`. Launchd receives only the owner-only runtime
+secrets file path, never its values; see [runtime secrets](docs/secrets.md).
 
 In **terminal 2**:
 
@@ -120,6 +116,28 @@ server; Polaris does not claim Ollama itself provides fan-out orchestration.
 
 See [Ollama configuration and probes](docs/providers/ollama.md) and the
 [fan-out example](examples/fanout/README.md).
+
+## v0.2 harness expansion
+
+The quickstart above remains the shortest Ollama path. Add only the surfaces you
+need:
+
+- **Curated memory:** explicit profile/subject scopes, provenance and trust,
+  frozen per-run snapshots, and threat-scanned recall. No automatic inferred
+  writes. [Memory guide →](docs/memory.md)
+- **Durable schedules:** once, interval, or five-field cron in an IANA timezone,
+  with bounded catch-up and explicit retry after interruption.
+  [Scheduler guide →](docs/scheduler.md)
+- **Private channels:** Telegram long polling or single-workspace Slack Socket
+  Mode, both denied unless user and channel IDs are allowlisted. Install with
+  `uv sync --extra channels` or `uv sync --all-extras`.
+  [Telegram →](docs/channels/telegram.md) ·
+  [Slack →](docs/channels/slack.md)
+- **Owner-only secrets:** strict non-shell `runtime-secrets.env` managed by
+  `polaris secrets`. [Secrets guide →](docs/secrets.md)
+
+The desktop console adds Memory, Schedules, and Channels views. Existing durable
+run, Ollama, and Foundry behavior remains compatible.
 
 ## Foundry Model Router quickstart
 
@@ -211,25 +229,23 @@ the actual `response.model` returned for every completed call.
 ## Architecture
 
 ```text
-CLI / independent macOS console
-              │ bearer-authenticated loopback API
-              ▼
-      polarisd · 127.0.0.1:8765
-        ├─ run service + approvals
-        ├─ K-worker ensemble engine
-        ├─ SQLite WAL journal
-        └─ content-addressed artifacts
-              │
-       ┌──────┴────────┐
-       ▼               ▼
- local Ollama    Foundry Responses API
- explicit K      model-router owns selection
+CLI · macOS console · Telegram/Slack adapters
+                     │ authenticated local control
+                     ▼
+         polarisd: run + approval harness
+           ├─ model loops ───── Ollama / Foundry Router
+           ├─ OS hands ──────── scoped tools
+           ├─ curated memory ── frozen run snapshots
+           └─ scheduler ─────── once / interval / cron
+                     │
+             SQLite journal + artifacts
 ```
 
 Details: [architecture](docs/architecture.md) ·
 [durability contract](docs/durability.md) ·
 [security boundary](docs/security.md) ·
-[design rationale](docs/design-rationale.md)
+[design rationale](docs/design-rationale.md) ·
+[memory](docs/memory.md) · [scheduler](docs/scheduler.md)
 
 Docker Compose is available for NAS-adjacent deployments, but keep the SQLite
 journal on local storage; see [Docker and NAS deployment](deploy/docker/README.md).
@@ -260,8 +276,11 @@ committed; the journal records that warning.
   network transport controls because Polaris does not terminate TLS.
 - Tool filesystem roots are explicit. Private HTTP access is off by default.
 - Shell is an opaque side effect and requires approval by default.
-- Provider secrets are read from named environment variables, never embedded in
-  JSON examples. Backups exclude credentials and the API token.
+- Provider/channel secrets are read from an owner-only strict runtime file or
+  named process environment variables, never embedded in JSON examples. Backups
+  exclude credentials, runtime secrets, and the API token.
+- Telegram and Slack require non-empty user and conversation allowlists. Their
+  outbound unknown state requires explicit reconciliation rather than blind retry.
 - The Tauri console is a separate client; it does not make the daemon a sandbox.
 
 Read the [threat model](docs/security.md) and [security policy](SECURITY.md)
@@ -280,14 +299,19 @@ before exposing the service.
   non-terminal; decide from the desktop or another terminal.
 - Offline mode constrains configured endpoints; it is not an OS-level network
   sandbox.
-- The current functional baseline is 203 Python tests, 9 frontend tests, and 5
-  Rust tests. Branch-aware Python coverage is 88.48% and enforced at 85%.
+- Telegram supports long polling text interactions only; Slack supports one
+  workspace through Socket Mode only.
+- Memory threat scanning is defense in depth, not a secret manager or proof that
+  arbitrary content is safe.
+- CI enforces the repository's lint, type, test, coverage, packaging, and
+  documentation quality gates across supported environments.
 
 ## Roadmap
 
 - Stabilize the run/artifact schema and migration policy.
 - Keep crash-window and recovery coverage above the enforced gate.
 - Improve operator-facing uncertainty reconciliation and approval inspection.
+- Exercise memory, scheduler, and channel restart behavior in longer-lived drills.
 - Expand signed, reproducible desktop packaging.
 - Validate longer recovery drills across macOS, Linux, and NAS-adjacent hosts.
 

@@ -59,6 +59,32 @@ describe("new run strategies", () => {
         }),
       ),
     );
+    const calls = vi.mocked(transport).mock.calls;
+    const body = calls[calls.length - 1]?.[0].body;
+    expect(body).not.toHaveProperty("profile_id");
+    expect(body).not.toHaveProperty("subject_key");
+  });
+
+  it("submits optional profile and subject memory context for single runs", async () => {
+    const user = userEvent.setup();
+    const { transport } = setup();
+    await user.click(screen.getByText("Optional memory context"));
+    await user.type(screen.getByLabelText("Profile"), "operations");
+    await user.type(screen.getByLabelText("Subject"), "incident-42");
+    await user.type(screen.getByLabelText("Prompt"), "Summarize known constraints");
+    await user.click(screen.getByRole("button", { name: "Start single run" }));
+
+    await waitFor(() =>
+      expect(transport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: "/v1/runs/single",
+          body: expect.objectContaining({
+            profile_id: "operations",
+            subject_key: "incident-42",
+          }),
+        }),
+      ),
+    );
   });
 
   it("submits workers, verifier, synthesizer, and concurrency to fan-out", async () => {

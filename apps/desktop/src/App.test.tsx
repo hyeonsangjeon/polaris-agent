@@ -47,4 +47,24 @@ describe("operator console", () => {
     expect(document.body).not.toHaveTextContent(bearerToken);
     expect(document.body.innerHTML).not.toContain(bearerToken);
   });
+
+  it("keeps all primary views reachable from the responsive navigation", async () => {
+    const user = userEvent.setup();
+    render(<App demo />);
+    await screen.findByText("Operational overview");
+
+    for (const [button, heading] of [
+      ["Memory", "Memory"],
+      ["Schedules", "Schedules"],
+      ["Channels", "Channels"],
+      ["Overview", "Operational overview"],
+      ["New run", "New run"],
+      ["Evidence", "Evidence"],
+      ["Approvals", "Approvals"],
+      ["Connection", "Connection"],
+    ]) {
+      await user.click(screen.getAllByRole("button", { name: new RegExp(`^${button}`) })[0]);
+      expect(await screen.findByRole("heading", { name: heading })).toBeVisible();
+    }
+  });
 });

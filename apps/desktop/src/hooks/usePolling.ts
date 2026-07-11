@@ -9,12 +9,13 @@ interface PollingState<T> {
 
 export function usePolling<T>(
   task: () => Promise<T>,
-  options: { enabled?: boolean; intervalMs?: number } = {},
+  options: { enabled?: boolean; intervalMs?: number; cacheKey?: string } = {},
 ): PollingState<T> {
-  const { enabled = true, intervalMs = 4000 } = options;
+  const { enabled = true, intervalMs = 4000, cacheKey } = options;
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [loading, setLoading] = useState(enabled);
+  const [settledKey, setSettledKey] = useState<string | undefined>(cacheKey);
   const taskRef = useRef(task);
   const refreshRef = useRef(0);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -30,6 +31,7 @@ export function usePolling<T>(
       setLoading(false);
       return;
     }
+    setLoading(true);
     let alive = true;
     let timer: number | undefined;
 
@@ -39,9 +41,11 @@ export function usePolling<T>(
         if (!alive) return;
         setData(result);
         setError(null);
+        setSettledKey(cacheKey);
       } catch (reason) {
         if (!alive) return;
         setError(reason instanceof Error ? reason : new Error("Request failed"));
+        setSettledKey(cacheKey);
       } finally {
         if (alive) {
           setLoading(false);
@@ -54,7 +58,13 @@ export function usePolling<T>(
       alive = false;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [enabled, intervalMs, refreshKey]);
+  }, [cacheKey, enabled, intervalMs, refreshKey]);
 
-  return { data, error, loading, refresh };
+  const current = settledKey === cacheKey;
+  return {
+    data: current ? data : null,
+    error: current ? error : null,
+    loading: loading || !current,
+    refresh,
+  };
 }

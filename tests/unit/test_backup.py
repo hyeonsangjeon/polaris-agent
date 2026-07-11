@@ -29,6 +29,7 @@ def source_state(tmp_path: Path) -> tuple[BackupManager, sqlite3.Connection]:
     artifacts.mkdir(parents=True)
     (artifacts / "result.txt").write_text("artifact content")
     (data / "api-token").write_text("never-back-this-up")
+    (data / "runtime-secrets.env").write_text("MODEL_API_KEY=never-back-this-up-either\n")
     config = data / "config.json"
     config.write_text(
         json.dumps(
@@ -78,7 +79,31 @@ def test_archive_roundtrip_live_sqlite_artifacts_and_token_exclusion(
     assert "embedded-header" not in restored_config
     assert "MODEL_API_KEY" in restored_config
     assert not (target_data / "api-token").exists()
+    assert not (target_data / "runtime-secrets.env").exists()
     assert stat.S_IMODE((target_data / "journal.sqlite3").stat().st_mode) == 0o600
+
+
+def test_export_defensively_excludes_secrets_nested_in_artifacts(tmp_path: Path) -> None:
+    source_data = tmp_path / "source"
+    artifacts = source_data / "artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "safe.txt").write_text("safe artifact")
+    secrets_file = artifacts / "nested" / "runtime.env"
+    secrets_file.parent.mkdir()
+    secrets_file.write_text("API_KEY=must-not-be-backed-up\n")
+    secrets_file.chmod(0o600)
+    backup = tmp_path / "state.polaris-backup"
+
+    BackupManager(
+        data_dir=source_data,
+        artifact_dir=artifacts,
+        secrets_file=secrets_file,
+    ).export(backup, "backup password")
+    restored = tmp_path / "restored"
+    BackupManager(data_dir=restored).import_archive(backup, "backup password")
+
+    assert (restored / "artifacts" / "safe.txt").read_text() == "safe artifact"
+    assert not (restored / "artifacts" / "nested" / "runtime.env").exists()
 
 
 def test_wrong_password_tamper_and_existing_state_fail_explicitly(tmp_path: Path) -> None:

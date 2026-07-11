@@ -11,8 +11,12 @@ from pydantic import ValidationError
 import polaris.tools.defaults as tool_defaults
 from polaris.config import (
     AppConfig,
+    ChannelsConfig,
+    DaemonConfig,
     OfflinePolicy,
     ProviderSpec,
+    SlackConfig,
+    TelegramConfig,
     ToolConfig,
     load_config,
     save_config,
@@ -50,6 +54,34 @@ def test_config_write_is_atomic_private_and_round_trips(tmp_path: Path) -> None:
     assert stat.S_IMODE(destination.stat().st_mode) == 0o600
     assert load_config(destination) == config
     assert not list(destination.parent.glob("*.tmp"))
+
+
+def test_config_resolves_default_and_relative_runtime_secrets_path(tmp_path: Path) -> None:
+    config = AppConfig(data_dir=tmp_path, tools=ToolConfig(roots=(tmp_path,)))
+    assert config.secrets_file == tmp_path / "runtime-secrets.env"
+
+    relative = config.model_copy(
+        update={"daemon": config.daemon.model_copy(update={"secrets_file": Path("private.env")})}
+    )
+    assert relative.secrets_file == tmp_path / "private.env"
+    assert relative.resolve_secrets_file("override/private.env") == (
+        tmp_path / "override" / "private.env"
+    )
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    ("artifacts/runtime.env", "config.json", "journal.sqlite3"),
+)
+def test_config_rejects_secrets_in_backup_staged_paths(
+    tmp_path: Path, relative_path: str
+) -> None:
+    with pytest.raises(ValidationError, match="staged for backup"):
+        AppConfig(
+            data_dir=tmp_path,
+            tools=ToolConfig(roots=(tmp_path,)),
+            daemon=DaemonConfig(secrets_file=Path(relative_path)),
+        )
 
 
 def test_config_rejects_invalid_endpoint_and_root(tmp_path: Path) -> None:
@@ -264,6 +296,70 @@ def test_config_rejects_secret_headers_credentials_and_unknown_references(
             data_dir=tmp_path,
             tools=ToolConfig(roots=(tmp_path,)),
             verifier="missing",
+        )
+
+
+def test_channel_config_is_secret_free_strict_and_offline_safe(tmp_path: Path) -> None:
+    telegram = TelegramConfig(
+        enabled=True,
+        token_env="TELEGRAM_TOKEN",
+        allowed_user_ids=("1",),
+        allowed_chat_ids=("2",),
+        default_provider="local",
+    )
+    slack = SlackConfig(
+        enabled=True,
+        bot_token_env="SLACK_BOT_TOKEN",
+        app_token_env="SLACK_APP_TOKEN",
+        allowed_user_ids=("U1",),
+        allowed_channel_ids=("C1",),
+        default_provider="local",
+    )
+    configured = AppConfig(
+        data_dir=tmp_path,
+        providers={
+            "local": spec(
+                kind="ollama",
+                base_url="http://127.0.0.1:11434",
+                api_key_env=None,
+            )
+        },
+        tools=ToolConfig(roots=(tmp_path,)),
+        channels=ChannelsConfig(telegram=telegram, slack=slack),
+    )
+    serialized = configured.model_dump_json()
+    assert "TELEGRAM_TOKEN" in serialized
+    assert "xoxb-" not in serialized
+
+    with pytest.raises(ValidationError, match="token_env"):
+        TelegramConfig(enabled=True, allowed_user_ids=("1",), allowed_chat_ids=("2",))
+    with pytest.raises(ValidationError, match="non-empty"):
+        SlackConfig(
+            enabled=True,
+            bot_token_env="BOT",
+            app_token_env="APP",
+        )
+    with pytest.raises(ValidationError, match="unknown provider"):
+        AppConfig(
+            data_dir=tmp_path,
+            tools=ToolConfig(roots=(tmp_path,)),
+            channels=ChannelsConfig(
+                telegram=TelegramConfig(default_provider="missing")
+            ),
+        )
+    with pytest.raises(ValidationError, match="remote channels"):
+        AppConfig(
+            data_dir=tmp_path,
+            tools=ToolConfig(roots=(tmp_path,)),
+            channels=ChannelsConfig(telegram=telegram),
+            providers={
+                "local": spec(
+                    kind="ollama",
+                    base_url="http://127.0.0.1:11434",
+                    api_key_env=None,
+                )
+            },
+            offline=OfflinePolicy(enabled=True),
         )
 
 

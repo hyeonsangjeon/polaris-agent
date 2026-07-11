@@ -18,6 +18,8 @@ describe("overview errors", () => {
         onSelectRun={() => undefined}
         onNewRun={() => undefined}
         pendingApprovals={[]}
+        scheduledJobs={[]}
+        channelStatus={null}
       />,
     );
 

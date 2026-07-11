@@ -23,9 +23,13 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
-      - run: uv sync --locked --dev
+      - run: uv sync --locked --dev --all-extras
       - name: Build wheel and source distribution
         run: uv run python -m build
+      - name: Verify optional channel metadata
+        run: >-
+          unzip -p dist/*.whl '*/METADATA' |
+          grep -F 'Provides-Extra: channels'
       - name: Verify archives
         run: |
           python -m zipfile --test dist/*.whl

@@ -10,6 +10,7 @@ import secrets
 import time
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import urlencode
 
 import typer
 from rich.console import Console
@@ -28,13 +29,33 @@ from ..config import (
 from ..daemon.main import serve as serve_daemon
 from ..daemon.service_manager import LaunchdServiceManager, ServiceManagerError
 from ..paths import default_paths
+from ..secrets import (
+    SecretsFile,
+    SecretsFileError,
+    runtime_environment,
+    validate_secret_name,
+)
 from .client import DaemonClient, DaemonClientError, read_token
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="Durable local agent runtime.")
 daemon_app = typer.Typer(add_completion=False, help="Manage the local daemon.")
 backup_app = typer.Typer(add_completion=False, help="Export or restore encrypted local state.")
+memory_app = typer.Typer(add_completion=False, help="Manage scope-isolated curated memory.")
+cron_app = typer.Typer(add_completion=False, help="Manage durable scheduled jobs.")
+channels_app = typer.Typer(add_completion=False, help="Inspect private channel delivery.")
+secrets_app = typer.Typer(
+    add_completion=False,
+    help=(
+        "Manage owner-only runtime secrets. Relative POLARIS_SECRETS_FILE paths "
+        "resolve under data_dir."
+    ),
+)
 app.add_typer(daemon_app, name="daemon")
 app.add_typer(backup_app, name="backup")
+app.add_typer(memory_app, name="memory")
+app.add_typer(cron_app, name="cron")
+app.add_typer(channels_app, name="channels")
+app.add_typer(secrets_app, name="secrets")
 console = Console()
 _TERMINAL = {"completed", "failed", "cancelled"}
 
@@ -46,10 +67,14 @@ class State:
         self.url = url or f"http://{self.config.daemon.host}:{self.config.daemon.port}"
 
     def client(self) -> DaemonClient:
-        token = secret_from_env(self.config.daemon.api_token_env)
+        secrets_path = _runtime_secrets_path(self.config)
+        try:
+            env = runtime_environment(secrets_path)
+        except SecretsFileError as exc:
+            raise DaemonClientError(str(exc)) from exc
+        token = secret_from_env(self.config.daemon.api_token_env, env)
         if token is None:
-            token_path = self.config.daemon.token_file or self.config.data_dir / "api-token"
-            token = read_token(token_path)
+            token = read_token(self.config.paths.token_file)
         return DaemonClient(self.url, token)
 
 
@@ -64,6 +89,11 @@ def callback(
 
 def _state(ctx: typer.Context) -> State:
     return ctx.ensure_object(State)
+
+
+def _runtime_secrets_path(config: AppConfig) -> Path:
+    override = os.environ.get("POLARIS_SECRETS_FILE")
+    return config.resolve_secrets_file(override)
 
 
 def _emit(value: Any, json_output: bool) -> None:
@@ -151,15 +181,111 @@ def daemon_serve(
 
 
 def _service_manager(state: State) -> LaunchdServiceManager:
+    secret_envs = {
+        name: spec.api_key_env
+        for name, spec in state.config.providers.items()
+        if spec.api_key_env is not None
+    }
+    channel_envs: dict[str, str | None] = {}
+    if state.config.channels.telegram.enabled:
+        channel_envs["channel:telegram"] = state.config.channels.telegram.token_env
+    if state.config.channels.slack.enabled:
+        channel_envs["channel:slack-bot"] = state.config.channels.slack.bot_token_env
+        channel_envs["channel:slack-app"] = state.config.channels.slack.app_token_env
+    secret_envs.update(
+        {name: env_name for name, env_name in channel_envs.items() if env_name is not None}
+    )
+    if state.config.daemon.api_token_env is not None:
+        secret_envs["daemon:api-token"] = state.config.daemon.api_token_env
     return LaunchdServiceManager(
         data_dir=state.config.data_dir,
         config_file=state.config_file or default_paths().config_file,
-        provider_api_key_envs={
-            name: spec.api_key_env
-            for name, spec in state.config.providers.items()
-            if spec.api_key_env is not None
-        },
+        provider_api_key_envs=secret_envs,
+        secrets_file=_runtime_secrets_path(state.config),
     )
+
+
+def _required_secret_names(config: AppConfig) -> set[str]:
+    required = {
+        spec.api_key_env
+        for spec in config.providers.values()
+        if spec.api_key_env is not None
+    }
+    if config.channels.telegram.enabled and config.channels.telegram.token_env is not None:
+        required.add(config.channels.telegram.token_env)
+    slack = config.channels.slack
+    if slack.enabled:
+        required.update(
+            name for name in (slack.bot_token_env, slack.app_token_env) if name is not None
+        )
+    if config.daemon.api_token_env is not None:
+        required.add(config.daemon.api_token_env)
+    return required
+
+
+def _secrets_file(state: State) -> SecretsFile:
+    return SecretsFile(_runtime_secrets_path(state.config))
+
+
+@secrets_app.command("set")
+def secrets_set(
+    ctx: typer.Context,
+    name: str,
+    from_env: str | None = typer.Option(
+        None,
+        "--from-env",
+        help="Read the value from this environment variable.",
+    ),
+) -> None:
+    try:
+        validate_secret_name(name)
+        if from_env is None:
+            value = str(typer.prompt("Secret value", hide_input=True))
+        else:
+            validate_secret_name(from_env)
+            if from_env not in os.environ:
+                raise SecretsFileError(f"environment variable {from_env!r} is not set")
+            value = os.environ[from_env]
+        _secrets_file(_state(ctx)).set(name, value)
+        console.print(f"Stored secret {name}.")
+    except (OSError, SecretsFileError) as exc:
+        _fail(exc)
+
+
+@secrets_app.command("list")
+def secrets_list(ctx: typer.Context) -> None:
+    try:
+        for name in _secrets_file(_state(ctx)).names():
+            typer.echo(name)
+    except (OSError, SecretsFileError) as exc:
+        _fail(exc)
+
+
+@secrets_app.command("remove")
+def secrets_remove(ctx: typer.Context, name: str) -> None:
+    try:
+        removed = _secrets_file(_state(ctx)).remove(name)
+        console.print(f"{'Removed' if removed else 'No stored value for'} secret {name}.")
+    except (OSError, SecretsFileError) as exc:
+        _fail(exc)
+
+
+@secrets_app.command("check")
+def secrets_check(ctx: typer.Context, names: list[str] | None = typer.Argument(None)) -> None:
+    state = _state(ctx)
+    try:
+        required = set(names or _required_secret_names(state.config))
+        for name in required:
+            validate_secret_name(name)
+        missing = _secrets_file(state).check(required)
+        if missing:
+            typer.echo(f"Missing required secrets: {', '.join(missing)}", err=True)
+            for name in missing:
+                typer.echo(f"Run `polaris secrets set {name}`.", err=True)
+            raise typer.Exit(1)
+        typer.echo("Runtime secrets file is valid.")
+    except (OSError, SecretsFileError) as exc:
+        _fail(exc)
 
 
 def _backup_manager(state: State) -> BackupManager:
@@ -169,6 +295,7 @@ def _backup_manager(state: State) -> BackupManager:
         config_file=state.config_file or default_paths().config_file,
         journal_file=paths.journal_file,
         artifact_dir=paths.artifact_dir,
+        secrets_file=_runtime_secrets_path(state.config),
     )
 
 
@@ -474,6 +601,457 @@ def models(ctx: typer.Context, json_output: bool = typer.Option(False, "--json")
 @app.command()
 def tools(ctx: typer.Context, json_output: bool = typer.Option(False, "--json")) -> None:
     _simple_request(ctx, "GET", "/v1/tools", json_output=json_output)
+
+
+def _query(path: str, **values: object) -> str:
+    selected = {key: value for key, value in values.items() if value is not None}
+    return path if not selected else f"{path}?{urlencode(selected)}"
+
+
+@memory_app.command("list")
+def memory_list_command(
+    ctx: typer.Context,
+    profile_id: str = typer.Option("default", "--profile"),
+    subject_key: str = typer.Option("local", "--subject"),
+    include_tombstones: bool = typer.Option(False, "--include-tombstones"),
+    limit: int | None = typer.Option(None, "--limit", min=1),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _simple_request(
+        ctx,
+        "GET",
+        _query(
+            "/v1/memory",
+            profile_id=profile_id,
+            subject_key=subject_key,
+            include_tombstones=str(include_tombstones).lower(),
+            limit=limit,
+        ),
+        json_output=json_output,
+    )
+
+
+@memory_app.command("search")
+def memory_search_command(
+    ctx: typer.Context,
+    query: str,
+    profile_id: str = typer.Option("default", "--profile"),
+    subject_key: str = typer.Option("local", "--subject"),
+    limit: int = typer.Option(10, "--limit", min=1, max=50),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _simple_request(
+        ctx,
+        "GET",
+        _query(
+            "/v1/memory/search",
+            query=query,
+            profile_id=profile_id,
+            subject_key=subject_key,
+            limit=limit,
+        ),
+        json_output=json_output,
+    )
+
+
+@memory_app.command("add")
+def memory_add_command(
+    ctx: typer.Context,
+    content: str,
+    profile_id: str = typer.Option("default", "--profile"),
+    subject_key: str = typer.Option("local", "--subject"),
+    kind: str = typer.Option("fact", "--kind"),
+    trust_level: str = typer.Option("user_asserted", "--trust"),
+    provenance_run_id: str | None = typer.Option(None, "--run-id"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _simple_request(
+        ctx,
+        "POST",
+        "/v1/memory",
+        payload={
+            "profile_id": profile_id,
+            "subject_key": subject_key,
+            "content": content,
+            "kind": kind,
+            "trust_level": trust_level,
+            "provenance_run_id": provenance_run_id,
+        },
+        json_output=json_output,
+    )
+
+
+@memory_app.command("revise")
+def memory_revise_command(
+    ctx: typer.Context,
+    entry_id: str,
+    content: str,
+    expected_revision: int = typer.Option(..., "--revision", min=1),
+    expected_hash: str | None = typer.Option(None, "--hash"),
+    profile_id: str = typer.Option("default", "--profile"),
+    subject_key: str = typer.Option("local", "--subject"),
+    kind: str | None = typer.Option(None, "--kind"),
+    trust_level: str | None = typer.Option(None, "--trust"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _simple_request(
+        ctx,
+        "PUT",
+        f"/v1/memory/{entry_id}",
+        payload={
+            key: value
+            for key, value in {
+                "profile_id": profile_id,
+                "subject_key": subject_key,
+                "content": content,
+                "kind": kind,
+                "trust_level": trust_level,
+                "expected_revision": expected_revision,
+                "expected_hash": expected_hash,
+            }.items()
+            if value is not None
+        },
+        json_output=json_output,
+    )
+
+
+@memory_app.command("remove")
+def memory_remove_command(
+    ctx: typer.Context,
+    entry_id: str,
+    expected_revision: int = typer.Option(..., "--revision", min=1),
+    expected_hash: str | None = typer.Option(None, "--hash"),
+    profile_id: str = typer.Option("default", "--profile"),
+    subject_key: str = typer.Option("local", "--subject"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _simple_request(
+        ctx,
+        "DELETE",
+        f"/v1/memory/{entry_id}",
+        payload={
+            "profile_id": profile_id,
+            "subject_key": subject_key,
+            "expected_revision": expected_revision,
+            "expected_hash": expected_hash,
+        },
+        json_output=json_output,
+    )
+
+
+def _job_payload(
+    prompt: str,
+    provider: str | None,
+    delivery_platform: str | None,
+    delivery_channel: str | None,
+) -> dict[str, Any]:
+    delivery = None
+    if delivery_platform is not None or delivery_channel is not None:
+        if delivery_platform is None or delivery_channel is None:
+            raise typer.BadParameter(
+                "--delivery-platform and --delivery-channel must be used together"
+            )
+        delivery = {
+            "platform": delivery_platform,
+            "channel_id": delivery_channel,
+        }
+    return {
+        "mode": "single",
+        "request": {"prompt": prompt, "provider": provider},
+        "delivery": delivery,
+    }
+
+
+def _create_job(
+    ctx: typer.Context,
+    *,
+    name: str,
+    schedule: dict[str, Any],
+    prompt: str,
+    provider: str | None,
+    catchup: str,
+    max_catchup: int,
+    delivery_platform: str | None,
+    delivery_channel: str | None,
+    json_output: bool,
+) -> None:
+    _simple_request(
+        ctx,
+        "POST",
+        "/v1/jobs",
+        payload={
+            "name": name,
+            "schedule": schedule,
+            "payload": _job_payload(
+                prompt,
+                provider,
+                delivery_platform,
+                delivery_channel,
+            ),
+            "catchup_policy": catchup,
+            "max_catchup": max_catchup,
+        },
+        json_output=json_output,
+    )
+
+
+@cron_app.command("once")
+def cron_once(
+    ctx: typer.Context,
+    name: str,
+    at: str,
+    prompt: str,
+    timezone: str = typer.Option("UTC", "--timezone"),
+    provider: str | None = typer.Option(None, "--provider"),
+    delivery_platform: str | None = typer.Option(None, "--delivery-platform"),
+    delivery_channel: str | None = typer.Option(None, "--delivery-channel"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _create_job(
+        ctx,
+        name=name,
+        schedule={"kind": "once", "once_at": at, "timezone": timezone},
+        prompt=prompt,
+        provider=provider,
+        catchup="fire_once",
+        max_catchup=1,
+        delivery_platform=delivery_platform,
+        delivery_channel=delivery_channel,
+        json_output=json_output,
+    )
+
+
+@cron_app.command("interval")
+def cron_interval(
+    ctx: typer.Context,
+    name: str,
+    seconds: float,
+    prompt: str,
+    timezone: str = typer.Option("UTC", "--timezone"),
+    start_at: str | None = typer.Option(None, "--start-at"),
+    provider: str | None = typer.Option(None, "--provider"),
+    catchup: str = typer.Option("fire_once", "--catchup"),
+    max_catchup: int = typer.Option(1, "--max-catchup", min=1, max=10),
+    delivery_platform: str | None = typer.Option(None, "--delivery-platform"),
+    delivery_channel: str | None = typer.Option(None, "--delivery-channel"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _create_job(
+        ctx,
+        name=name,
+        schedule={
+            "kind": "interval",
+            "interval_seconds": seconds,
+            "start_at": start_at,
+            "timezone": timezone,
+        },
+        prompt=prompt,
+        provider=provider,
+        catchup=catchup,
+        max_catchup=max_catchup,
+        delivery_platform=delivery_platform,
+        delivery_channel=delivery_channel,
+        json_output=json_output,
+    )
+
+
+@cron_app.command("add")
+def cron_add(
+    ctx: typer.Context,
+    name: str,
+    expression: str,
+    prompt: str,
+    timezone: str = typer.Option(..., "--timezone"),
+    provider: str | None = typer.Option(None, "--provider"),
+    catchup: str = typer.Option("fire_once", "--catchup"),
+    max_catchup: int = typer.Option(1, "--max-catchup", min=1, max=10),
+    delivery_platform: str | None = typer.Option(None, "--delivery-platform"),
+    delivery_channel: str | None = typer.Option(None, "--delivery-channel"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _create_job(
+        ctx,
+        name=name,
+        schedule={"kind": "cron", "cron": expression, "timezone": timezone},
+        prompt=prompt,
+        provider=provider,
+        catchup=catchup,
+        max_catchup=max_catchup,
+        delivery_platform=delivery_platform,
+        delivery_channel=delivery_channel,
+        json_output=json_output,
+    )
+
+
+@cron_app.command("list")
+def cron_list(
+    ctx: typer.Context,
+    state: str | None = typer.Option(None, "--state"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _simple_request(
+        ctx,
+        "GET",
+        _query("/v1/jobs", job_state=state),
+        json_output=json_output,
+    )
+
+
+@cron_app.command("show")
+def cron_show(
+    ctx: typer.Context,
+    job_id: str,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _simple_request(ctx, "GET", f"/v1/jobs/{job_id}", json_output=json_output)
+
+
+def _job_action(
+    ctx: typer.Context, job_id: str, action: str, json_output: bool
+) -> None:
+    _simple_request(
+        ctx,
+        "POST",
+        f"/v1/jobs/{job_id}/{action}",
+        json_output=json_output,
+    )
+
+
+@cron_app.command("pause")
+def cron_pause(
+    ctx: typer.Context,
+    job_id: str,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _job_action(ctx, job_id, "pause", json_output)
+
+
+@cron_app.command("resume")
+def cron_resume(
+    ctx: typer.Context,
+    job_id: str,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _job_action(ctx, job_id, "resume", json_output)
+
+
+@cron_app.command("cancel")
+def cron_cancel(
+    ctx: typer.Context,
+    job_id: str,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _job_action(ctx, job_id, "cancel", json_output)
+
+
+@cron_app.command("preview")
+def cron_preview(
+    ctx: typer.Context,
+    expression: str,
+    after: str,
+    timezone: str = typer.Option(..., "--timezone"),
+    count: int = typer.Option(5, "--count", min=1, max=100),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _simple_request(
+        ctx,
+        "POST",
+        "/v1/jobs/preview",
+        payload={
+            "schedule": {
+                "kind": "cron",
+                "cron": expression,
+                "timezone": timezone,
+            },
+            "after": after,
+            "count": count,
+        },
+        json_output=json_output,
+    )
+
+
+@cron_app.command("runs")
+def cron_runs(
+    ctx: typer.Context,
+    job_id: str | None = typer.Option(None, "--job"),
+    status: str | None = typer.Option(None, "--status"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _simple_request(
+        ctx,
+        "GET",
+        _query("/v1/jobs/runs", job_id=job_id, run_status=status),
+        json_output=json_output,
+    )
+
+
+@cron_app.command("retry")
+def cron_retry(
+    ctx: typer.Context,
+    run_id: str,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _simple_request(
+        ctx,
+        "POST",
+        f"/v1/jobs/runs/{run_id}/retry",
+        json_output=json_output,
+    )
+
+
+@channels_app.command("status")
+def channels_status_command(
+    ctx: typer.Context,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _simple_request(ctx, "GET", "/v1/channels/status", json_output=json_output)
+
+
+@channels_app.command("unknown")
+def channels_unknown(
+    ctx: typer.Context,
+    platform: str | None = typer.Option(None, "--platform"),
+    limit: int = typer.Option(500, "--limit", min=1, max=5000),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _simple_request(
+        ctx,
+        "GET",
+        _query("/v1/channels/outbox/unknown", platform=platform, limit=limit),
+        json_output=json_output,
+    )
+
+
+@channels_app.command("mark-sent")
+def channels_mark_sent(
+    ctx: typer.Context,
+    idempotency_key: str,
+    note: str = typer.Option(..., "--note"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _simple_request(
+        ctx,
+        "POST",
+        f"/v1/channels/outbox/{idempotency_key}/mark-sent",
+        payload={"note": note},
+        json_output=json_output,
+    )
+
+
+@channels_app.command("retry")
+def channels_retry(
+    ctx: typer.Context,
+    idempotency_key: str,
+    note: str = typer.Option(..., "--note"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    _simple_request(
+        ctx,
+        "POST",
+        f"/v1/channels/outbox/{idempotency_key}/retry",
+        payload={"note": note},
+        json_output=json_output,
+    )
 
 
 def _simple_request(

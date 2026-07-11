@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, cast
 
 from polaris.journal import (
@@ -82,6 +83,9 @@ class RuntimeConfig:
     reservation_calls: int = 1
     reservation_micro_usd: int = 0
     no_progress_threshold: int = 3
+    memory_context: str | None = None
+    memory_scope: Mapping[str, str] | None = None
+    memory_snapshot_hash: str | None = None
 
     def __post_init__(self) -> None:
         if self.max_iterations <= 0:
@@ -96,6 +100,17 @@ class RuntimeConfig:
                 raise ValueError(f"{name} must be a non-negative integer")
         if self.no_progress_threshold <= 0:
             raise ValueError("no_progress_threshold must be positive")
+        if self.memory_context is not None and not isinstance(self.memory_context, str):
+            raise TypeError("memory_context must be a string or None")
+        if self.memory_scope is not None:
+            scope = dict(self.memory_scope)
+            if set(scope) != {"profile_id", "subject_key"} or not all(
+                isinstance(value, str) and value for value in scope.values()
+            ):
+                raise ValueError("memory_scope requires non-empty profile_id and subject_key")
+            object.__setattr__(self, "memory_scope", MappingProxyType(scope))
+        if self.memory_snapshot_hash is not None and not self.memory_snapshot_hash:
+            raise ValueError("memory_snapshot_hash must not be empty")
 
     @property
     def token_reservation(self) -> int:
@@ -145,6 +160,8 @@ class AgentRuntime:
         request: str,
         mode: str = "single",
         budget: Budget | Mapping[str, Any] | None = None,
+        *,
+        external_key: str | None = None,
     ) -> RunRecord:
         requested_model = self.provider.config.model
         preapproved = (
@@ -167,12 +184,16 @@ class AgentRuntime:
             "reservation_calls": self.config.reservation_calls,
             "reservation_micro_usd": self.config.reservation_micro_usd,
             "no_progress_threshold": self.config.no_progress_threshold,
+            "memory_context": self.config.memory_context,
+            "memory_scope": self.config.memory_scope,
+            "memory_snapshot_hash": self.config.memory_snapshot_hash,
         }
         return self.journal.create_run(
             mode,
             {"prompt": request},
             persisted_config,
             budget=budget,
+            external_key=external_key,
         )
 
     async def run(
@@ -180,8 +201,12 @@ class AgentRuntime:
         request: str,
         mode: str = "single",
         budget: Budget | Mapping[str, Any] | None = None,
+        *,
+        external_key: str | None = None,
     ) -> AgentResult:
-        return await self.execute(self.create_run(request, mode, budget).id)
+        return await self.execute(
+            self.create_run(request, mode, budget, external_key=external_key).id
+        )
 
     def recover(self) -> tuple[str, ...]:
         self.journal.reclaim_expired_leases()
@@ -237,6 +262,13 @@ class AgentRuntime:
         request = run.request
         prompt = request.get("prompt") if isinstance(request, Mapping) else request
         content = prompt if isinstance(prompt, str) else canonical_json(prompt)
+        memory_context = (
+            run.config.get("memory_context")
+            if isinstance(run.config, Mapping)
+            else self.config.memory_context
+        )
+        if isinstance(memory_context, str) and memory_context:
+            content = f"{content}\n\n{memory_context}"
         messages: list[Message] = []
         system_prompt = (
             run.config.get("system_prompt", self.config.system_prompt)

@@ -12,6 +12,9 @@ private reporting and supported versions, see the repository
 - journal integrity, approval decisions, receipts, and budget records;
 - the authority of the local user and approved shell commands;
 - provider quota and billing.
+- curated memory content, provenance, and scope boundaries;
+- scheduled prompts, delivery targets, and occurrence history;
+- Telegram/Slack tokens, allowlists, messages, and approval decisions.
 
 ## Trust boundaries
 
@@ -28,6 +31,52 @@ flowchart LR
 The daemon, journal, artifacts, and tool processes run with the host user's
 authority. The bearer token authenticates API clients; it does not isolate
 processes already acting as that user.
+
+Telegram long polling and Slack Socket Mode are additional remote trust
+boundaries. An adapter authenticates to its platform, applies both sender and
+conversation allowlists, then submits accepted commands to the same daemon
+service and journal used by local clients.
+
+### Curated memory poisoning
+
+**Threat:** stored content impersonates instructions, crosses user boundaries,
+contains a secret, or changes while a run is in progress.
+
+**Controls:** explicit profile/subject scopes; no automatic inferred writes;
+revision/hash checks; per-run frozen snapshots; trust/provenance metadata;
+prompt-injection, known-secret, configured-secret, and integrity scanning; prompt
+rendering that labels memory as untrusted data.
+
+**Residual risk:** scanning is pattern-based and cannot prove content safe or
+true. Memory is model-visible and backup-persistent. Never use it for secrets.
+
+### Scheduled replay or burst
+
+**Threat:** downtime causes an unexpected burst, DST changes timing, or a stale
+occurrence is repeated after an ambiguous effect.
+
+**Controls:** IANA timezone parsing and preview; explicit `skip`, `fire_once`, or
+bounded catch-up (maximum 10); transactional occurrence dedupe; startup claim
+cap; stale runs become interrupted and require explicit retry.
+
+**Residual risk:** explicit retry can repeat billing or effects. Host clock and
+timezone database correctness remain trusted dependencies.
+
+### Channel impersonation and duplicate delivery
+
+**Threat:** an untrusted account submits work/approval, a duplicate event creates
+two runs, or an ambiguous send is repeated.
+
+**Controls:** deny-by-default user plus chat/channel allowlists; Telegram long
+polling only; Slack single-workspace Socket Mode only; durable event/downstream
+dedupe, inbox/outbox leases, and Telegram offsets; unknown outbound status stops
+without blind retry.
+
+**Residual risk:** a compromised allowlisted account can exercise remote commands
+and approve effects. Platform/workspace administrators retain their platform
+authority. Message metadata and content enter local state. The v0.2 scheduler
+does not revalidate its explicit outbound delivery target against the inbound
+allowlist; operators must select an allowlisted destination.
 
 ## Threats and controls
 
@@ -85,9 +134,10 @@ offline operation.
 **Threat:** API keys or bearer tokens enter JSON, logs, backups, screenshots, or
 bug reports.
 
-**Controls:** provider configuration names environment variables instead of
-storing values; authentication headers are rejected in config; token files use
-private permissions; encrypted backups omit credentials and the API token.
+**Controls:** provider/channel configuration names environment variables instead
+of storing values; authentication headers are rejected in config; the strict
+runtime secrets file is owner-only `0600`, non-shell parsed, and symlink-rejected;
+encrypted backups omit credentials, runtime secrets, and the API token.
 
 **Operator requirement:** keep secrets in a credential manager/environment,
 restrict state-directory permissions, and apply the
@@ -148,3 +198,5 @@ and price estimation depend on upstream responses/configuration.
 5. Use an egress firewall for a true no-cloud profile.
 6. Redact `doctor`, timelines, artifacts, and screenshots before sharing.
 7. Test restore and crash recovery with disposable data before production use.
+8. Keep channel allowlists minimal and inspect the identity attached to every
+   remote approval.

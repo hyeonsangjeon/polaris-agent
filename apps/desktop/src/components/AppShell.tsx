@@ -7,6 +7,9 @@ export type ViewName =
   | "run"
   | "evidence"
   | "approvals"
+  | "memory"
+  | "schedules"
+  | "channels"
   | "settings";
 
 const nav: Array<{ id: ViewName; label: string; key: string }> = [
@@ -14,6 +17,9 @@ const nav: Array<{ id: ViewName; label: string; key: string }> = [
   { id: "new-run", label: "New run", key: "N" },
   { id: "evidence", label: "Evidence", key: "E" },
   { id: "approvals", label: "Approvals", key: "A" },
+  { id: "memory", label: "Memory", key: "M" },
+  { id: "schedules", label: "Schedules", key: "J" },
+  { id: "channels", label: "Channels", key: "C" },
 ];
 
 export function AppShell({
@@ -78,7 +84,7 @@ export function AppShell({
           </button>
           <div className="build-id">
             <span>Local console</span>
-            <code>v0.1.0</code>
+            <code>v0.2.0</code>
           </div>
         </div>
       </aside>

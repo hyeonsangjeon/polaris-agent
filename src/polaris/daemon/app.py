@@ -15,6 +15,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from polaris.channels import ChannelTransitionError
 from polaris.ensemble import WorkerSpec
 from polaris.journal import (
     InvalidTransitionError,
@@ -22,14 +23,29 @@ from polaris.journal import (
     JournalNotFoundError,
     JournalValidationError,
 )
+from polaris.memory import MemoryConflictError, MemoryNotFoundError, MemoryScope
 from polaris.providers import ProviderConfigurationError, ProviderError
+from polaris.scheduler import (
+    JobPayload,
+    SchedulerConflictError,
+    SchedulerNotFoundError,
+    ScheduleSpec,
+)
 
 from ..service import AgentService
 from .schemas import (
     ApprovalDecisionRequest,
     FanoutRunRequest,
     FoundryRouterRunRequest,
+    JobCreateRequest,
+    JobPayloadSchema,
+    MemoryAddRequest,
+    MemoryRemoveRequest,
+    MemoryReviseRequest,
+    OutboxResolutionRequest,
     RunResponse,
+    SchedulePreviewRequest,
+    ScheduleSchema,
     SingleRunRequest,
 )
 
@@ -51,9 +67,33 @@ def _run_response(run: object) -> RunResponse:
     return RunResponse.model_validate(_plain(run))
 
 
+def _schedule(value: ScheduleSchema) -> ScheduleSpec:
+    if value.kind == "once":
+        if value.once_at is None:
+            raise ValueError("once schedule requires once_at")
+        return ScheduleSpec.once(value.once_at, timezone=value.timezone)
+    if value.kind == "interval":
+        if value.interval_seconds is None:
+            raise ValueError("interval schedule requires interval_seconds")
+        return ScheduleSpec.interval(
+            value.interval_seconds,
+            start_at=value.start_at,
+            timezone=value.timezone,
+        )
+    if value.cron is None:
+        raise ValueError("cron schedule requires cron")
+    return ScheduleSpec.cron_schedule(value.cron, timezone=value.timezone)
+
+
+def _payload(value: JobPayloadSchema) -> JobPayload:
+    return JobPayload(value.mode, value.request, value.delivery)
+
+
 def create_app(service: AgentService, api_token: str) -> FastAPI:
     if not isinstance(api_token, str) or not api_token:
         raise ValueError("api_token must be a non-empty string")
+    service.add_runtime_secrets((api_token,))
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await service.startup()
@@ -86,11 +126,16 @@ def create_app(service: AgentService, api_token: str) -> FastAPI:
     auth = [Depends(authenticate)]
 
     @app.exception_handler(JournalNotFoundError)
-    async def not_found(_request: Request, exc: JournalNotFoundError) -> JSONResponse:
+    @app.exception_handler(MemoryNotFoundError)
+    @app.exception_handler(SchedulerNotFoundError)
+    async def not_found(_request: Request, exc: Exception) -> JSONResponse:
         return _error(404, "not_found", str(exc))
 
     @app.exception_handler(InvalidTransitionError)
     @app.exception_handler(JournalConflictError)
+    @app.exception_handler(MemoryConflictError)
+    @app.exception_handler(SchedulerConflictError)
+    @app.exception_handler(ChannelTransitionError)
     async def conflict(_request: Request, exc: Exception) -> JSONResponse:
         return _error(409, "conflict", str(exc))
 
@@ -120,6 +165,8 @@ def create_app(service: AgentService, api_token: str) -> FastAPI:
             provider=body.provider,
             budget=body.budget.model_dump(exclude_none=True),
             schedule=body.schedule,
+            profile_id=body.profile_id,
+            subject_key=body.subject_key,
         )
         return _run_response(run)
 
@@ -216,6 +263,202 @@ def create_app(service: AgentService, api_token: str) -> FastAPI:
     @app.get("/v1/tools", dependencies=auth)
     async def tools() -> dict[str, list[str]]:
         return {"tools": list(service.tool_names())}
+
+    @app.get("/v1/memory", dependencies=auth)
+    async def memory_list(
+        profile_id: str = "default",
+        subject_key: str = "local",
+        include_tombstones: bool = False,
+        limit: int | None = None,
+    ) -> Any:
+        return jsonable_encoder(
+            _plain(
+                service.memory_list(
+                    profile_id=profile_id,
+                    subject_key=subject_key,
+                    include_tombstones=include_tombstones,
+                    limit=limit,
+                )
+            )
+        )
+
+    @app.get("/v1/memory/search", dependencies=auth)
+    async def memory_search(
+        query: str,
+        profile_id: str = "default",
+        subject_key: str = "local",
+        limit: int = 10,
+    ) -> Any:
+        return jsonable_encoder(
+            _plain(
+                service.memory_search(
+                    None,
+                    query,
+                    profile_id=profile_id,
+                    subject_key=subject_key,
+                    limit=limit,
+                )
+            )
+        )
+
+    @app.post("/v1/memory", dependencies=auth, status_code=201)
+    async def memory_add(body: MemoryAddRequest) -> Any:
+        return jsonable_encoder(
+            _plain(
+                service.memory_add(
+                    MemoryScope(body.profile_id, body.subject_key),
+                    body.content,
+                    kind=body.kind,
+                    trust_level=body.trust_level,
+                    provenance_run_id=body.provenance_run_id,
+                    provenance_session_id=body.provenance_session_id,
+                    provenance_message_id=body.provenance_message_id,
+                    idempotency_key=body.idempotency_key,
+                )
+            )
+        )
+
+    @app.put("/v1/memory/{entry_id}", dependencies=auth)
+    async def memory_revise(entry_id: str, body: MemoryReviseRequest) -> Any:
+        provenance = {
+            field: getattr(body, field)
+            for field in (
+                "provenance_run_id",
+                "provenance_session_id",
+                "provenance_message_id",
+            )
+            if field in body.model_fields_set
+        }
+        return jsonable_encoder(
+            _plain(
+                service.memory_revise(
+                    MemoryScope(body.profile_id, body.subject_key),
+                    entry_id,
+                    body.content,
+                    expected_revision=body.expected_revision,
+                    expected_hash=body.expected_hash,
+                    kind=body.kind,
+                    trust_level=body.trust_level,
+                    **provenance,
+                )
+            )
+        )
+
+    @app.delete("/v1/memory/{entry_id}", dependencies=auth)
+    async def memory_remove(entry_id: str, body: MemoryRemoveRequest) -> Any:
+        return jsonable_encoder(
+            _plain(
+                service.memory_remove(
+                    MemoryScope(body.profile_id, body.subject_key),
+                    entry_id,
+                    expected_revision=body.expected_revision,
+                    expected_hash=body.expected_hash,
+                )
+            )
+        )
+
+    @app.post("/v1/jobs/preview", dependencies=auth)
+    async def preview_job(body: SchedulePreviewRequest) -> Any:
+        from polaris.scheduler.models import parse_timestamp
+
+        after = parse_timestamp(body.after, body.schedule.timezone)
+        return jsonable_encoder(
+            service.preview_schedule(
+                _schedule(body.schedule),
+                after=after,
+                count=body.count,
+            )
+        )
+
+    @app.post("/v1/jobs", dependencies=auth, status_code=201)
+    async def create_job(body: JobCreateRequest) -> Any:
+        return jsonable_encoder(
+            _plain(
+                service.create_job(
+                    _schedule(body.schedule),
+                    _payload(body.payload),
+                    name=body.name,
+                    catchup_policy=body.catchup_policy,
+                    max_catchup=body.max_catchup,
+                    grace_seconds=body.grace_seconds,
+                )
+            )
+        )
+
+    @app.get("/v1/jobs", dependencies=auth)
+    async def list_jobs(job_state: str | None = None) -> Any:
+        return jsonable_encoder(_plain(service.list_jobs(job_state)))
+
+    @app.get("/v1/jobs/runs", dependencies=auth)
+    async def all_job_runs(
+        job_id: str | None = None, run_status: str | None = None
+    ) -> Any:
+        return jsonable_encoder(
+            _plain(service.list_job_runs(job_id=job_id, status=run_status))
+        )
+
+    @app.post("/v1/jobs/runs/{run_id}/retry", dependencies=auth, status_code=202)
+    async def retry_job_run(run_id: str) -> Any:
+        return jsonable_encoder(_plain(service.retry_job_run(run_id)))
+
+    @app.get("/v1/jobs/{job_id}", dependencies=auth)
+    async def get_job(job_id: str) -> Any:
+        return jsonable_encoder(_plain(service.get_job(job_id)))
+
+    @app.post("/v1/jobs/{job_id}/pause", dependencies=auth)
+    async def pause_job(job_id: str) -> Any:
+        return jsonable_encoder(_plain(service.pause_job(job_id)))
+
+    @app.post("/v1/jobs/{job_id}/resume", dependencies=auth)
+    async def resume_job(job_id: str) -> Any:
+        return jsonable_encoder(_plain(service.resume_job(job_id)))
+
+    @app.post("/v1/jobs/{job_id}/cancel", dependencies=auth)
+    @app.delete("/v1/jobs/{job_id}", dependencies=auth)
+    async def cancel_job(job_id: str) -> Any:
+        return jsonable_encoder(_plain(service.cancel_job(job_id)))
+
+    @app.get("/v1/jobs/{job_id}/runs", dependencies=auth)
+    async def job_runs(job_id: str, run_status: str | None = None) -> Any:
+        service.get_job(job_id)
+        return jsonable_encoder(
+            _plain(service.list_job_runs(job_id=job_id, status=run_status))
+        )
+
+    @app.get("/v1/channels/status", dependencies=auth)
+    async def channels_status() -> Any:
+        return jsonable_encoder(service.channels_status())
+
+    @app.get("/v1/channels/outbox/unknown", dependencies=auth)
+    async def unknown_outbox(
+        platform: str | None = None,
+        limit: int = 500,
+    ) -> Any:
+        return jsonable_encoder(
+            _plain(service.unknown_outbox(platform=platform, limit=limit))
+        )
+
+    @app.post(
+        "/v1/channels/outbox/{idempotency_key}/mark-sent",
+        dependencies=auth,
+    )
+    async def mark_outbox_sent(
+        idempotency_key: str, body: OutboxResolutionRequest
+    ) -> Any:
+        return jsonable_encoder(
+            _plain(service.mark_outbox_sent(idempotency_key, note=body.note))
+        )
+
+    @app.post(
+        "/v1/channels/outbox/{idempotency_key}/retry",
+        dependencies=auth,
+    )
+    async def retry_outbox(
+        idempotency_key: str, body: OutboxResolutionRequest
+    ) -> Any:
+        return jsonable_encoder(
+            _plain(service.retry_outbox(idempotency_key, note=body.note))
+        )
 
     @app.get("/v1/runs/{run_id}/events", dependencies=auth)
     async def events(

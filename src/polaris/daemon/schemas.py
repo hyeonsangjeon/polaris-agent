@@ -25,6 +25,8 @@ class SingleRunRequest(StrictSchema):
     provider: NonEmpty | None = None
     budget: BudgetSchema = Field(default_factory=BudgetSchema)
     schedule: bool = True
+    profile_id: NonEmpty | None = None
+    subject_key: NonEmpty | None = None
 
 
 class WorkerRequest(StrictSchema):
@@ -72,3 +74,68 @@ class RunResponse(StrictSchema):
 class ErrorResponse(StrictSchema):
     error: str
     detail: str
+
+
+class MemoryScopeSchema(StrictSchema):
+    profile_id: NonEmpty = "default"
+    subject_key: NonEmpty = "local"
+
+
+class MemoryAddRequest(MemoryScopeSchema):
+    content: NonEmpty
+    kind: Literal["user", "agent", "fact", "preference"] = "fact"
+    trust_level: Literal["user_asserted", "model_inferred", "verified"] = "user_asserted"
+    provenance_run_id: NonEmpty | None = None
+    provenance_session_id: NonEmpty | None = None
+    provenance_message_id: NonEmpty | None = None
+    idempotency_key: NonEmpty | None = None
+
+
+class MemoryReviseRequest(MemoryScopeSchema):
+    content: NonEmpty
+    kind: Literal["user", "agent", "fact", "preference"] | None = None
+    trust_level: Literal["user_asserted", "model_inferred", "verified"] | None = None
+    provenance_run_id: NonEmpty | None = None
+    provenance_session_id: NonEmpty | None = None
+    provenance_message_id: NonEmpty | None = None
+    expected_revision: int = Field(ge=1)
+    expected_hash: NonEmpty | None = None
+
+
+class MemoryRemoveRequest(MemoryScopeSchema):
+    expected_revision: int = Field(ge=1)
+    expected_hash: NonEmpty | None = None
+
+
+class ScheduleSchema(StrictSchema):
+    kind: Literal["once", "interval", "cron"]
+    once_at: NonEmpty | None = None
+    interval_seconds: float | None = Field(default=None, gt=0)
+    cron: NonEmpty | None = None
+    timezone: NonEmpty
+    start_at: NonEmpty | None = None
+
+
+class JobPayloadSchema(StrictSchema):
+    mode: Literal["single", "fanout", "foundry-router"]
+    request: dict[str, Any]
+    delivery: dict[str, Any] | None = None
+
+
+class JobCreateRequest(StrictSchema):
+    name: str = ""
+    schedule: ScheduleSchema
+    payload: JobPayloadSchema
+    catchup_policy: Literal["skip", "fire_once", "bounded"] = "fire_once"
+    max_catchup: int = Field(default=1, ge=1, le=10)
+    grace_seconds: float = Field(default=0, ge=0)
+
+
+class SchedulePreviewRequest(StrictSchema):
+    schedule: ScheduleSchema
+    after: NonEmpty
+    count: int = Field(default=5, ge=1, le=100)
+
+
+class OutboxResolutionRequest(StrictSchema):
+    note: NonEmpty

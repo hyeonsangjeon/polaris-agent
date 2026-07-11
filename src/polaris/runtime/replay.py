@@ -57,11 +57,18 @@ def _tool_result(output: object) -> object:
 
 def recorded_replay(journal: Journal, run_id: str) -> ReplayResult:
     run = journal.get_run(run_id)
-    prompt: Any = run.request.get("prompt") if isinstance(run.request, dict) else run.request
+    prompt: Any = (
+        run.request.get("prompt") if isinstance(run.request, Mapping) else run.request
+    )
     messages: list[Message] = []
-    if isinstance(run.config, dict) and run.config.get("system_prompt"):
+    if isinstance(run.config, Mapping) and run.config.get("system_prompt"):
         messages.append(Message("system", str(run.config["system_prompt"])))
-    messages.append(Message("user", prompt if isinstance(prompt, str) else canonical_json(prompt)))
+    user_content = prompt if isinstance(prompt, str) else canonical_json(prompt)
+    if isinstance(run.config, Mapping):
+        memory_context = run.config.get("memory_context")
+        if isinstance(memory_context, str) and memory_context:
+            user_content = f"{user_content}\n\n{memory_context}"
+    messages.append(Message("user", user_content))
 
     final_output: str | None = None
     for step in journal.list_steps(run_id):

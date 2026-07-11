@@ -14,6 +14,7 @@ from polaris.daemon.service_manager import (
     ServiceManagerError,
     UnsupportedServicePlatformError,
 )
+from polaris.secrets import SecretsFile
 
 
 class RecordingRunner:
@@ -68,7 +69,7 @@ def test_install_writes_private_secret_free_plist_and_bootstraps(tmp_path: Path)
     assert not list(path.parent.glob("*.tmp"))
 
 
-def test_install_rejects_api_key_environment_without_writing_plist(tmp_path: Path) -> None:
+def test_install_rejects_missing_required_secret_without_writing_plist(tmp_path: Path) -> None:
     runner = RecordingRunner()
     service = LaunchdServiceManager(
         data_dir=tmp_path / "data",
@@ -80,11 +81,62 @@ def test_install_rejects_api_key_environment_without_writing_plist(tmp_path: Pat
         platform_system=lambda: "Darwin",
     )
 
-    with pytest.raises(ServiceManagerError, match="foreground"):
+    with pytest.raises(ServiceManagerError, match="polaris secrets set AZURE_FOUNDRY_API_KEY"):
         service.install()
 
     assert not service.plist_path.exists()
     assert runner.commands == []
+
+
+def test_install_accepts_private_secrets_file_without_putting_values_in_plist(
+    tmp_path: Path,
+) -> None:
+    runner = RecordingRunner()
+    secrets_file = tmp_path / "data" / "runtime-secrets.env"
+    SecretsFile(secrets_file).set("AZURE_FOUNDRY_API_KEY", "do-not-serialize")
+    service = LaunchdServiceManager(
+        data_dir=tmp_path / "data",
+        provider_api_key_envs={"foundry": "AZURE_FOUNDRY_API_KEY"},
+        secrets_file=secrets_file,
+        runner=runner,
+        uid=501,
+        home=tmp_path / "home",
+        python_executable="/private/venv/bin/python",
+        platform_system=lambda: "Darwin",
+    )
+
+    path = service.install()
+    payload = plistlib.loads(path.read_bytes())
+    assert payload["EnvironmentVariables"] == {
+        "POLARIS_HOME": str((tmp_path / "data").resolve()),
+        "POLARIS_SECRETS_FILE": str(secrets_file),
+    }
+    assert "do-not-serialize" not in path.read_text()
+
+
+def test_install_requires_daemon_api_token_environment_name(tmp_path: Path) -> None:
+    runner = RecordingRunner()
+    secrets_file = tmp_path / "data" / "runtime-secrets.env"
+    SecretsFile(secrets_file).set("PROVIDER_KEY", "provider-value")
+    service = LaunchdServiceManager(
+        data_dir=tmp_path / "data",
+        provider_api_key_envs={
+            "provider": "PROVIDER_KEY",
+            "daemon:api-token": "DAEMON_TOKEN",
+        },
+        secrets_file=secrets_file,
+        runner=runner,
+        uid=501,
+        home=tmp_path / "home",
+        python_executable="/private/venv/bin/python",
+        platform_system=lambda: "Darwin",
+    )
+
+    with pytest.raises(ServiceManagerError, match="DAEMON_TOKEN"):
+        service.install()
+
+    assert runner.commands == []
+    assert not service.plist_path.exists()
 
 
 def test_start_stop_status_and_uninstall_use_exact_gui_domain(tmp_path: Path) -> None:

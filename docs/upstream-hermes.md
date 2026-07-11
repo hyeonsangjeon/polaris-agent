@@ -32,3 +32,17 @@ The full upstream MIT notice is preserved in `THIRD_PARTY_NOTICES.md`.
 
 Each destination file carries a source revision header. Detailed modifications
 and test mappings are recorded in `provenance/hermes-port.json`.
+
+## v0.2 harness concepts
+
+The memory, scheduler, secrets, Telegram, and Slack documentation and behavior
+are independently written for Polaris. They use common agent/runtime concepts:
+explicit memory tools, scheduled prompts, private chat commands, durable
+inbox/outbox processing, and least-privilege secret references. Hermes and other
+agent projects demonstrate demand for these concepts; that conceptual influence
+is credited without copying their prose, prompts, UI, manifests, or integration
+code.
+
+No v0.2 documentation statement changes the file-level provenance rule above.
+Any future copied or substantially adapted implementation must be added to the
+provenance manifest and carry the required source revision header before release.

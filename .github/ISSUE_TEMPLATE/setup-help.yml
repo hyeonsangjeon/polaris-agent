@@ -1,5 +1,5 @@
 name: Setup help
-description: Ask for help with Ollama, Foundry, the daemon, desktop, or Docker setup.
+description: Ask for help with providers, memory, schedules, channels, secrets, desktop, or Docker.
 title: "[Setup]: "
 labels: ["setup", "needs-triage"]
 body:
@@ -11,6 +11,11 @@ body:
         - Ollama local
         - Foundry Model Router with API key
         - Foundry Model Router with Entra
+        - Curated memory
+        - Scheduler / cron
+        - Telegram long polling
+        - Slack Socket Mode
+        - Runtime secrets
         - macOS launchd
         - Tauri macOS console
         - Docker / NAS-adjacent
@@ -47,6 +52,12 @@ body:
     validations:
       required: true
   - type: textarea
+    id: harness-context
+    attributes:
+      label: Redacted harness context
+      description: Include applicable profile/subject, job/job-run ID, channel platform/event type/event ID, and run ID. Do not include memory or message content.
+      placeholder: "profile=default, subject=REDACTED, job=…, platform=Slack, event=app_mention, event_id=…, run=…"
+  - type: textarea
     id: docs
     attributes:
       label: Documentation already tried
@@ -56,5 +67,5 @@ body:
     attributes:
       label: Redaction
       options:
-        - label: I removed API keys, daemon tokens, prompts, private paths, and sensitive artifact content.
+        - label: I removed API/channel keys, daemon tokens, runtime-secret values, prompts, memory/message content, user/chat/channel IDs, private paths, and sensitive artifacts.
           required: true

@@ -137,6 +137,40 @@ or tool calls and is suitable for audit and deterministic inspection.
 state. Results, cost, and effects can differ. Polaris exposes replay; creating a
 new run is the explicit rerun path.
 
+## Memory snapshots
+
+Curated memory writes are explicit, revisioned, and scope-bound. At run creation,
+Polaris stores the hash and rendered content of one bounded snapshot in the run
+configuration. Later memory revisions cannot change the context of an existing
+run or replay. Threat-blocked entries are replaced with a stable blocked marker.
+This preserves the observed input; it does not prove that remembered claims are
+true.
+
+## Scheduled occurrences
+
+The scheduler calculates due times, inserts an occurrence, and advances the job
+inside one immediate SQLite transaction. A unique `(job_id, scheduled_for)`
+constraint prevents two committed local occurrence records. Catch-up policy
+decides which missed times are eligible, with bounded catch-up capped at 10.
+
+A claimed/running occurrence whose lease expires is marked `interrupted` with an
+ambiguous-outcome warning. It is not automatically retried. `polaris cron retry`
+is an explicit operator decision that increments the attempt and may duplicate a
+provider charge or effect. Creating a Polaris run and delivering its result are
+separate statuses.
+
+## Channel events and delivery
+
+Telegram updates and Slack envelopes are durably ingested before command
+handling. Platform event IDs, downstream keys, Telegram offsets, inbox records,
+and stable outbox keys deduplicate local work across reconnects and restarts.
+Final results and approval-paused notices use deterministic outbox identities.
+
+No messaging API can make an ambiguous network send exactly once. A transport
+failure after the remote service may have accepted the message becomes
+`unknown`; Polaris does not blindly retry it. The operator must inspect the
+destination and explicitly mark it sent or authorize a retry.
+
 ## What Polaris guarantees
 
 - deterministic step keys prevent two committed records for the same planned
@@ -144,6 +178,9 @@ new run is the explicit rerun path.
 - committed outputs are reused;
 - leases prevent concurrent ownership while valid;
 - approvals and uncertainty decisions survive restart;
+- memory snapshots remain frozen for their run;
+- scheduled occurrence claims and channel ingest/outbox transitions are
+  transactional and deduplicated by stable local identities;
 - budgets are reserved before calls and settled afterward;
 - append-only events and content hashes make recorded history inspectable.
 
@@ -154,7 +191,9 @@ new run is the explicit rerun path.
 - recovery while the journal itself is lost or corrupt;
 - distributed failover across multiple journal writers or network filesystems;
 - that a model's repeated response is deterministic;
-- that operator approval makes a dangerous command safe.
+- that operator approval makes a dangerous command safe;
+- exactly-once Telegram or Slack delivery across an unknown network outcome;
+- automatic retry of stale scheduled execution.
 
 Design integrations around idempotency keys, receipts, and reconciliation when
 effects matter. Otherwise expect an uncertainty stop.

@@ -131,6 +131,8 @@ interface FormProps {
 function SingleForm({ client, providers, submit, submitting }: FormProps) {
   const [prompt, setPrompt] = useState("");
   const [provider, setProvider] = useProviderChoice(providers, 0, true);
+  const [profileId, setProfileId] = useState("");
+  const [subjectKey, setSubjectKey] = useState("");
   const [budget, setBudget] = useState<BudgetInput>({
     call_limit: 8,
     token_limit: 24000,
@@ -139,7 +141,16 @@ function SingleForm({ client, providers, submit, submitting }: FormProps) {
   });
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
-    void submit(() => client.submitSingle({ prompt, provider, budget, schedule: true }));
+    void submit(() =>
+      client.submitSingle({
+        prompt,
+        provider,
+        ...(profileId.trim() ? { profile_id: profileId.trim() } : {}),
+        ...(subjectKey.trim() ? { subject_key: subjectKey.trim() } : {}),
+        budget,
+        schedule: true,
+      }),
+    );
   };
   return (
     <form onSubmit={onSubmit}>
@@ -169,6 +180,27 @@ function SingleForm({ client, providers, submit, submitting }: FormProps) {
         </select>
         {!providers.length && <small>No configured providers were reported by the daemon.</small>}
       </label>
+      <details className="single-memory-context">
+        <summary>Optional memory context</summary>
+        <div className="form-grid two">
+          <label>
+            Profile
+            <input
+              value={profileId}
+              onChange={(event) => setProfileId(event.target.value)}
+              placeholder="Use daemon default"
+            />
+          </label>
+          <label>
+            Subject
+            <input
+              value={subjectKey}
+              onChange={(event) => setSubjectKey(event.target.value)}
+              placeholder="Use daemon default"
+            />
+          </label>
+        </div>
+      </details>
       <BudgetFields value={budget} onChange={setBudget} />
       <SubmitButton
         submitting={submitting}

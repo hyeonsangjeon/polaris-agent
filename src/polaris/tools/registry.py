@@ -219,6 +219,24 @@ class ToolRegistry:
         with self._lock:
             return tuple(sorted(self._entries))
 
+    def clone(self) -> ToolRegistry:
+        """Create an isolated registry snapshot with the same immutable entries."""
+        with self._lock:
+            entries = tuple(self._entries.values())
+            aliases = dict(self._aliases)
+            clone = ToolRegistry(
+                availability_ttl=self._availability_ttl,
+                last_good_grace=self._last_good_grace,
+                clock=self._clock,
+            )
+        for entry in entries:
+            clone.register(entry)
+        for alias, target in aliases.items():
+            clone.register_alias(alias, target)
+        return clone
+
+    snapshot = clone
+
     def _is_available(self, entry: ToolEntry) -> bool:
         check = entry.availability_check
         if check is None:

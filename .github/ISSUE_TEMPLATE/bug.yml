@@ -6,12 +6,12 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for the report. Remove tokens, keys, prompts, private paths, and artifact contents. Security vulnerabilities belong in a private advisory.
+        Thanks for the report. Remove tokens, runtime-secret values, prompts, memory/message content, user/chat/channel IDs, private paths, and artifacts. Security vulnerabilities belong in a private advisory.
   - type: input
     id: version
     attributes:
       label: Polaris version or commit
-      placeholder: "0.1.0 or commit SHA"
+      placeholder: "release tag or commit SHA"
     validations:
       required: true
   - type: input
@@ -22,6 +22,36 @@ body:
       placeholder: "run_… or N/A"
     validations:
       required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Harness component
+      options:
+        - Run / tool execution
+        - Curated memory
+        - Scheduler
+        - Telegram
+        - Slack
+        - Runtime secrets / launchd
+        - Desktop console
+        - Deployment / backup
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: harness-ids
+    attributes:
+      label: Job, job-run, platform event, or outbox ID
+      description: Include only applicable IDs. IDs are not credentials, but can link to sensitive records.
+      placeholder: "job_… / job-run UUID / Telegram update_id / Slack event_id / outbox key / N/A"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Channel platform and event type
+      description: For channel bugs, name Telegram or Slack and the event type; do not paste message content.
+      placeholder: "Slack app_mention, Telegram message, or N/A"
   - type: dropdown
     id: os
     attributes:
@@ -86,7 +116,7 @@ body:
     attributes:
       label: Safety checks
       options:
-        - label: I removed daemon tokens and provider credentials.
+        - label: I removed daemon/provider/channel tokens, runtime-secret values, memory/message content, and private paths.
           required: true
         - label: This is not a private security vulnerability.
           required: true

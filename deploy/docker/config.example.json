@@ -3,7 +3,8 @@
     "graceful_timeout_seconds": 30.0,
     "host": "0.0.0.0",
     "port": 8765,
-    "token_file": "/data/api-token"
+    "token_file": "/data/api-token",
+    "secrets_file": "/run/secrets/polaris-runtime.env"
   },
   "data_dir": "/data",
   "providers": {
@@ -21,5 +22,22 @@
     "roots": [
       "/workspace"
     ]
+  },
+  "memory": {
+    "enabled": true,
+    "profile_id": "default",
+    "char_budget": 12000,
+    "tool_enabled": true
+  },
+  "scheduler": {
+    "enabled": true
+  },
+  "channels": {
+    "telegram": {
+      "enabled": false
+    },
+    "slack": {
+      "enabled": false
+    }
   }
 }

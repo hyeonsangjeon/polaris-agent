@@ -25,6 +25,11 @@ body:
         - Single
         - Fan-out
         - Foundry Router
+        - Curated memory
+        - Scheduler
+        - Telegram
+        - Slack
+        - Runtime secrets
         - Daemon / API
         - Desktop console
         - Deployment
@@ -44,6 +49,11 @@ body:
       label: Security, approval, and data considerations
     validations:
       required: true
+  - type: textarea
+    id: identity
+    attributes:
+      label: Scope, trigger, and identity model
+      description: For memory/scheduler/channel work, explain profile/subject scope, occurrence/event/run IDs, allowlists, dedupe, and delivery identity as applicable.
   - type: textarea
     id: alternatives
     attributes:

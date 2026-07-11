@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+import time
 import uuid
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
@@ -36,7 +37,7 @@ from .models import (
     StepStatus,
 )
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 3
 
 _RUN_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
     RunStatus.CREATED: frozenset(
@@ -76,7 +77,7 @@ class Journal:
             self._connection.execute("PRAGMA foreign_keys = ON")
             self._connection.execute(f"PRAGMA busy_timeout = {busy_timeout_ms:d}")
             self._connection.execute("PRAGMA synchronous = FULL")
-            self._connection.execute("PRAGMA journal_mode = WAL")
+            self._enable_wal(busy_timeout_ms)
             self._migrate()
 
     def __enter__(self) -> Journal:
@@ -105,6 +106,17 @@ class Journal:
         if self._closed:
             raise JournalClosedError("journal is closed")
 
+    def _enable_wal(self, busy_timeout_ms: int) -> None:
+        deadline = time.monotonic() + (busy_timeout_ms / 1000)
+        while True:
+            try:
+                self._connection.execute("PRAGMA journal_mode = WAL")
+                return
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.01)
+
     @contextmanager
     def _transaction(self, *, immediate: bool = False) -> Iterator[sqlite3.Connection]:
         with self._lock:
@@ -117,6 +129,21 @@ class Journal:
                 raise
             else:
                 self._connection.commit()
+
+    @staticmethod
+    def _execute_migration_script(connection: sqlite3.Connection, script: str) -> None:
+        statement = ""
+        for line in script.splitlines():
+            statement = f"{statement}\n{line}"
+            if not sqlite3.complete_statement(statement):
+                continue
+            sql = statement.strip()
+            statement = ""
+            if sql.upper() in {"BEGIN IMMEDIATE;", "COMMIT;"}:
+                continue
+            connection.execute(sql)
+        if statement.strip():
+            raise JournalValidationError("incomplete journal migration statement")
 
     def _migrate(self) -> None:
         self._connection.execute(
@@ -137,7 +164,14 @@ class Journal:
                 f"{version} is newer than supported version {_SCHEMA_VERSION}"
             )
         if version == 0:
-            self._connection.executescript(
+            with self._transaction(immediate=True) as connection:
+                row = connection.execute(
+                    "SELECT MAX(version) AS version FROM schema_version"
+                ).fetchone()
+                current = int(row["version"] or 0)
+                if current == 0:
+                    self._execute_migration_script(
+                        connection,
                 """
                 BEGIN IMMEDIATE;
 
@@ -282,13 +316,92 @@ class Journal:
                 );
                 CREATE INDEX IF NOT EXISTS budget_reservations_run_idx
                     ON budget_reservations(run_id, status);
+                INSERT OR IGNORE INTO schema_version(version, applied_at)
+                    VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
                 COMMIT;
                 """
-            )
-            self._connection.execute(
-                "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES (?, ?)",
-                (_SCHEMA_VERSION, utc_now()),
-            )
+                    )
+                    connection.execute(
+                        """
+                        INSERT OR IGNORE INTO schema_version(version, applied_at)
+                        VALUES (?, ?)
+                        """,
+                        (1, utc_now()),
+                    )
+                    current = 1
+                version = current
+        if version == 1:
+            with self._transaction(immediate=True) as connection:
+                row = connection.execute(
+                    "SELECT MAX(version) AS version FROM schema_version"
+                ).fetchone()
+                current = int(row["version"] or 0)
+                if current == 1:
+                    connection.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS run_external_keys (
+                            external_key TEXT NOT NULL UNIQUE,
+                            run_id TEXT NOT NULL REFERENCES runs(id),
+                            mode_hash TEXT NOT NULL,
+                            request_hash TEXT NOT NULL,
+                            config_hash TEXT NOT NULL,
+                            budget_hash TEXT NOT NULL,
+                            parent_run_id TEXT,
+                            created_at TEXT NOT NULL
+                        )
+                        """
+                    )
+                    connection.executemany(
+                        "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES (?, ?)",
+                        ((2, utc_now()), (3, utc_now())),
+                    )
+            version = _SCHEMA_VERSION
+        if version == 2:
+            with self._transaction(immediate=True) as connection:
+                row = connection.execute(
+                    "SELECT MAX(version) AS version FROM schema_version"
+                ).fetchone()
+                current = int(row["version"] or 0)
+                if current == 2:
+                    connection.execute(
+                        "ALTER TABLE run_external_keys ADD COLUMN budget_hash TEXT"
+                    )
+                    connection.execute(
+                        "ALTER TABLE run_external_keys ADD COLUMN parent_run_id TEXT"
+                    )
+                    rows = connection.execute(
+                        """
+                        SELECT run_external_keys.external_key, runs.parent_run_id,
+                            runs.call_limit, runs.token_limit, runs.micro_usd_limit,
+                            runs.wall_seconds_limit
+                        FROM run_external_keys
+                        JOIN runs ON runs.id = run_external_keys.run_id
+                        """
+                    ).fetchall()
+                    for existing in rows:
+                        connection.execute(
+                            """
+                            UPDATE run_external_keys
+                            SET budget_hash = ?, parent_run_id = ?
+                            WHERE external_key = ?
+                            """,
+                            (
+                                self._budget_identity_hash(
+                                    Budget(
+                                        call_limit=existing["call_limit"],
+                                        token_limit=existing["token_limit"],
+                                        micro_usd_limit=existing["micro_usd_limit"],
+                                        wall_seconds_limit=existing["wall_seconds_limit"],
+                                    )
+                                ),
+                                existing["parent_run_id"],
+                                existing["external_key"],
+                            ),
+                        )
+                    connection.execute(
+                        "INSERT INTO schema_version(version, applied_at) VALUES (?, ?)",
+                        (3, utc_now()),
+                    )
 
     @staticmethod
     def _new_id(prefix: str) -> str:
@@ -376,6 +489,17 @@ class Journal:
             used_tokens=row["used_tokens"],
             used_micro_usd=row["used_micro_usd"],
             used_wall_seconds=row["used_wall_seconds"],
+        )
+
+    @staticmethod
+    def _budget_identity_hash(budget: Budget) -> str:
+        return sha256_hex(
+            {
+                "call_limit": budget.call_limit,
+                "token_limit": budget.token_limit,
+                "micro_usd_limit": budget.micro_usd_limit,
+                "wall_seconds_limit": budget.wall_seconds_limit,
+            }
         )
 
     @classmethod
@@ -531,16 +655,51 @@ class Journal:
         parent_run_id: str | None = None,
         *,
         budget: Budget | Mapping[str, Any] | None = None,
+        external_key: str | None = None,
     ) -> RunRecord:
         """Create a durable run in the created state."""
         if not mode:
             raise JournalValidationError("mode must not be empty")
+        if external_key is not None and not external_key.strip():
+            raise JournalValidationError("external_key must not be empty")
         if budget_limits is not None and budget is not None:
             raise JournalValidationError("pass either budget_limits or budget, not both")
         limits = self._budget_from_input(budget if budget is not None else budget_limits)
+        request_json = canonical_json(request)
+        config_json = canonical_json(config)
+        mode_hash = sha256_hex(mode)
+        request_hash = sha256_hex(request)
+        config_hash = sha256_hex(config)
+        budget_hash = self._budget_identity_hash(limits)
         run_id = self._new_id("run")
         timestamp = utc_now()
         with self._transaction(immediate=True) as connection:
+            if external_key is not None:
+                existing = connection.execute(
+                    """
+                    SELECT runs.*, run_external_keys.mode_hash,
+                        run_external_keys.request_hash, run_external_keys.config_hash,
+                        run_external_keys.budget_hash,
+                        run_external_keys.parent_run_id AS external_parent_run_id
+                    FROM run_external_keys
+                    JOIN runs ON runs.id = run_external_keys.run_id
+                    WHERE run_external_keys.external_key = ?
+                    """,
+                    (external_key,),
+                ).fetchone()
+                if existing is not None:
+                    if (
+                        existing["mode_hash"] != mode_hash
+                        or existing["request_hash"] != request_hash
+                        or existing["config_hash"] != config_hash
+                        or existing["budget_hash"] != budget_hash
+                        or existing["external_parent_run_id"] != parent_run_id
+                    ):
+                        raise JournalConflictError(
+                            f"external key {external_key!r} already identifies a different run"
+                        )
+                    row = existing
+                    return self._run_from_row(row)
             if parent_run_id is not None:
                 self._require_row(
                     connection.execute(
@@ -560,8 +719,8 @@ class Journal:
                 (
                     run_id,
                     mode,
-                    canonical_json(request),
-                    canonical_json(config),
+                    request_json,
+                    config_json,
                     RunStatus.CREATED.value,
                     parent_run_id,
                     limits.call_limit,
@@ -572,6 +731,25 @@ class Journal:
                     timestamp,
                 ),
             )
+            if external_key is not None:
+                connection.execute(
+                    """
+                    INSERT INTO run_external_keys(
+                        external_key, run_id, mode_hash, request_hash, config_hash,
+                        budget_hash, parent_run_id, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        external_key,
+                        run_id,
+                        mode_hash,
+                        request_hash,
+                        config_hash,
+                        budget_hash,
+                        parent_run_id,
+                        timestamp,
+                    ),
+                )
             self._append_event(
                 connection,
                 run_id,

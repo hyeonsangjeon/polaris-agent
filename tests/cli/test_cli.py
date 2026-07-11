@@ -186,6 +186,31 @@ def test_doctor_and_run_use_daemon_client(
     assert json.loads(doctor.output)["fake"]["ok"] is True
     assert run.exit_code == 0
     assert fake.requests[-1][1] == "/v1/runs/single"
+    payload = fake.requests[-1][2]
+    assert isinstance(payload, dict)
+    assert "profile_id" not in payload
+    assert "subject_key" not in payload
+
+
+def test_relative_secrets_override_and_daemon_token_env_use_data_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config_file = tmp_path / "config.json"
+    data_dir = tmp_path / "data"
+    config = AppConfig(
+        data_dir=data_dir,
+        tools=ToolConfig(roots=(tmp_path,)),
+        daemon=DaemonConfig(api_token_env="DAEMON_API_TOKEN"),
+    )
+    save_config(config, config_file)
+    monkeypatch.setenv("POLARIS_SECRETS_FILE", "private/runtime.env")
+    state = State(config_file, None)
+
+    assert cli_main._runtime_secrets_path(config) == data_dir / "private" / "runtime.env"
+    manager = cli_main._service_manager(state)
+    assert manager.secrets_file == data_dir / "private" / "runtime.env"
+    assert manager.provider_api_key_envs["daemon:api-token"] == "DAEMON_API_TOKEN"
+    assert "DAEMON_API_TOKEN" in cli_main._required_secret_names(config)
 
 
 def configured(tmp_path: Path) -> Path:
@@ -242,6 +267,59 @@ def test_fanout_wait_renders_replay(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["replay"]["final_output"] == "report"
     assert fake.requests[0][1] == "/v1/runs/fanout"
+
+
+def test_memory_cron_and_channel_subcommands(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config_file = configured(tmp_path)
+    fake = FakeClient(
+        [
+            {"id": "memory-1"},
+            [{"id": "memory-1"}],
+            {"id": "memory-1", "revision": 2},
+            {"id": "job-1"},
+            [{"id": "job-1"}],
+            {"telegram_enabled": False},
+            [],
+        ]
+    )
+    monkeypatch.setattr(State, "client", lambda self: fake)
+
+    commands = [
+        ["memory", "add", "remember this", "--json"],
+        ["memory", "list", "--json"],
+        ["memory", "revise", "memory-1", "revised", "--revision", "1", "--json"],
+        [
+            "cron",
+            "once",
+            "one",
+            "2027-01-01T00:00:00Z",
+            "say hello",
+            "--json",
+        ],
+        ["cron", "list", "--json"],
+        ["channels", "status", "--json"],
+        ["channels", "unknown", "--json"],
+    ]
+    for command in commands:
+        result = runner.invoke(app, ["--config", str(config_file), *command])
+        assert result.exit_code == 0, result.output
+
+    paths = [request[1] for request in fake.requests]
+    assert paths[0] == "/v1/memory"
+    assert paths[1].startswith("/v1/memory?")
+    assert paths[2] == "/v1/memory/memory-1"
+    assert fake.requests[2][2] == {
+        "profile_id": "default",
+        "subject_key": "local",
+        "content": "revised",
+        "expected_revision": 1,
+    }
+    assert paths[3] == "/v1/jobs"
+    assert paths[4] == "/v1/jobs"
+    assert paths[5] == "/v1/channels/status"
+    assert paths[6].startswith("/v1/channels/outbox/unknown")
 
 
 def test_listing_and_simple_commands(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

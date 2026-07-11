@@ -1,5 +1,5 @@
 import type { PolarisClient } from "../api/client";
-import type { Approval, ProviderHealth } from "../api/types";
+import type { Approval, ChannelStatus, Job, ProviderHealth } from "../api/types";
 import { RunTable } from "../components/RunTable";
 import { ErrorState, LoadingState } from "../components/StatePanel";
 import { usePolling } from "../hooks/usePolling";
@@ -11,12 +11,16 @@ export function OverviewView({
   onSelectRun,
   onNewRun,
   pendingApprovals,
+  scheduledJobs,
+  channelStatus,
 }: {
   client: PolarisClient;
   providers: ProviderHealth[];
   onSelectRun: (id: string) => void;
   onNewRun: () => void;
   pendingApprovals: Approval[];
+  scheduledJobs: Job[];
+  channelStatus: ChannelStatus | null;
 }) {
   const { data: runs, loading, error, refresh } = usePolling(() => client.runs(), {
     intervalMs: 4000,
@@ -33,6 +37,10 @@ export function OverviewView({
       .map((approval) => approval.run_id),
   ).size;
   const completed = data.filter((run) => run.status === "completed").length;
+  const scheduled = scheduledJobs.filter((job) => job.state === "scheduled").length;
+  const channelsHealthy = channelStatus
+    ? channelStatus.started && channelStatus.failures.length === 0
+    : null;
 
   return (
     <div className="view">
@@ -52,6 +60,13 @@ export function OverviewView({
         <Metric label="Paused" value={paused} tone="paused" note="awaiting intervention" />
         <Metric label="Uncertain" value={uncertain} tone="uncertain" note="side effect unresolved" />
         <Metric label="Completed" value={completed} tone="complete" note="durably recorded" />
+        <Metric label="Scheduled" value={scheduled} tone="scheduled" note="active durable jobs" />
+        <Metric
+          label="Channels"
+          value={channelsHealthy === null ? "—" : channelsHealthy ? "OK" : "!"}
+          tone={channelsHealthy ? "active" : "uncertain"}
+          note={channelStatus ? `${channelStatus.running_tasks} adapter tasks` : "status unavailable"}
+        />
       </section>
 
       <div className="overview-grid">
@@ -109,7 +124,7 @@ function Metric({
   note,
 }: {
   label: string;
-  value: number;
+  value: number | string;
   tone: string;
   note: string;
 }) {

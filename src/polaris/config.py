@@ -25,6 +25,7 @@ from .paths import PolarisPaths, default_paths
 
 NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 EnvName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
+Identifier = NonEmpty | int
 ProviderKind = Literal[
     "ollama",
     "openai_compatible",
@@ -117,7 +118,76 @@ class DaemonConfig(StrictConfigModel):
     port: int = Field(default=8765, ge=1, le=65535)
     api_token_env: EnvName | None = None
     token_file: Path | None = None
+    secrets_file: Path | None = None
     graceful_timeout_seconds: float = Field(default=30.0, gt=0)
+
+
+class MemoryConfig(StrictConfigModel):
+    enabled: bool = True
+    profile_id: NonEmpty = "default"
+    char_budget: int = Field(default=12000, ge=0)
+    tool_enabled: bool = True
+
+
+class SchedulerConfig(StrictConfigModel):
+    enabled: bool = True
+    tick_seconds: float = Field(default=1.0, gt=0)
+    lease_seconds: float = Field(default=60.0, gt=0)
+    batch: int = Field(default=32, ge=1, le=100)
+    startup_cap: int = Field(default=10, ge=1, le=100)
+
+
+class TelegramConfig(StrictConfigModel):
+    enabled: bool = False
+    token_env: EnvName | None = None
+    allowed_user_ids: tuple[Identifier, ...] = ()
+    allowed_chat_ids: tuple[Identifier, ...] = ()
+    default_provider: NonEmpty | None = None
+    long_poll_timeout: int = Field(default=30, ge=0, le=60)
+    request_timeout: float = Field(default=10.0, gt=0)
+    close_timeout: float = Field(default=5.0, gt=0)
+    max_conflicts: int = Field(default=3, ge=1, le=20)
+    backoff_base: float = Field(default=0.5, gt=0)
+    backoff_max: float = Field(default=30.0, gt=0)
+
+    @model_validator(mode="after")
+    def enabled_requirements(self) -> TelegramConfig:
+        if self.enabled and self.token_env is None:
+            raise ValueError("enabled Telegram requires token_env")
+        if self.enabled and (not self.allowed_user_ids or not self.allowed_chat_ids):
+            raise ValueError(
+                "enabled Telegram requires non-empty allowed_user_ids and allowed_chat_ids"
+            )
+        return self
+
+
+class SlackConfig(StrictConfigModel):
+    enabled: bool = False
+    bot_token_env: EnvName | None = None
+    app_token_env: EnvName | None = None
+    allowed_user_ids: tuple[Identifier, ...] = ()
+    allowed_channel_ids: tuple[Identifier, ...] = ()
+    default_provider: NonEmpty | None = None
+    connect_timeout: float = Field(default=30.0, gt=0)
+    close_timeout: float = Field(default=5.0, gt=0)
+    watchdog_interval: float = Field(default=10.0, gt=0)
+    reconnect_backoff_base: float = Field(default=0.5, gt=0)
+    reconnect_backoff_max: float = Field(default=30.0, gt=0)
+
+    @model_validator(mode="after")
+    def enabled_requirements(self) -> SlackConfig:
+        if self.enabled and (self.bot_token_env is None or self.app_token_env is None):
+            raise ValueError("enabled Slack requires bot_token_env and app_token_env")
+        if self.enabled and (not self.allowed_user_ids or not self.allowed_channel_ids):
+            raise ValueError(
+                "enabled Slack requires non-empty allowed_user_ids and allowed_channel_ids"
+            )
+        return self
+
+
+class ChannelsConfig(StrictConfigModel):
+    telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    slack: SlackConfig = Field(default_factory=SlackConfig)
 
 
 class WorkerTemplate(StrictConfigModel):
@@ -137,6 +207,9 @@ class AppConfig(StrictConfigModel):
     providers: dict[str, ProviderSpec] = Field(default_factory=dict)
     tools: ToolConfig = Field(default_factory=ToolConfig)
     daemon: DaemonConfig = Field(default_factory=DaemonConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
+    channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     workers: tuple[WorkerTemplate, ...] = ()
     verifier: NonEmpty | None = None
     synthesizer: NonEmpty | None = None
@@ -169,10 +242,20 @@ class AppConfig(StrictConfigModel):
         known = set(self.providers) | set(aliases)
         references = [worker.provider for worker in self.workers]
         references.extend(item for item in (self.verifier, self.synthesizer) if item is not None)
+        references.extend(
+            item
+            for item in (
+                self.channels.telegram.default_provider,
+                self.channels.slack.default_provider,
+            )
+            if item is not None
+        )
         missing = sorted(set(references) - known)
         if missing:
             raise ValueError(f"unknown provider reference: {missing[0]!r}")
         if self.offline.enabled:
+            if self.channels.telegram.enabled or self.channels.slack.enabled:
+                raise ValueError("offline policy rejects enabled remote channels")
             for name, spec in self.providers.items():
                 if not _offline_endpoint_allowed(
                     str(spec.base_url),
@@ -182,17 +265,51 @@ class AppConfig(StrictConfigModel):
                     raise ValueError(
                         f"offline policy rejects non-local provider endpoint {name!r}"
                     )
+        secrets_file = self.secrets_file.resolve()
+        paths = self.paths
+        if (
+            secrets_file in {paths.config_file.resolve(), paths.journal_file.resolve()}
+            or secrets_file.is_relative_to(paths.artifact_dir.resolve())
+        ):
+            raise ValueError(
+                "daemon.secrets_file must be outside files and trees staged for backup"
+            )
         return self
 
     @property
     def paths(self) -> PolarisPaths:
+        configured_token = self.daemon.token_file
+        if configured_token is None:
+            token_file = self.data_dir / "api-token"
+        else:
+            expanded_token = configured_token.expanduser()
+            token_file = (
+                expanded_token
+                if expanded_token.is_absolute()
+                else self.data_dir / expanded_token
+            ).resolve()
         return PolarisPaths(
             data_dir=self.data_dir,
             config_file=self.data_dir / "config.json",
             journal_file=self.data_dir / "journal.sqlite3",
             artifact_dir=self.data_dir / "artifacts",
-            token_file=self.daemon.token_file or self.data_dir / "api-token",
+            token_file=token_file,
         )
+
+    @property
+    def secrets_file(self) -> Path:
+        return self.resolve_secrets_file()
+
+    def resolve_secrets_file(self, override: str | Path | None = None) -> Path:
+        """Resolve configured and environment override paths against data_dir."""
+
+        configured = self.daemon.secrets_file if override is None else Path(override)
+        if configured is None:
+            return self.data_dir / "runtime-secrets.env"
+        expanded = configured.expanduser()
+        if not expanded.is_absolute():
+            expanded = self.data_dir / expanded
+        return expanded.resolve()
 
 
 def _offline_endpoint_allowed(

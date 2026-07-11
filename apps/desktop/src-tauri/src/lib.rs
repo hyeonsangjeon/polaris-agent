@@ -11,6 +11,8 @@ const MAX_TOKEN_FILE_BYTES: u64 = 16 * 1024;
 enum RequestMethod {
     Get,
     Post,
+    Put,
+    Delete,
 }
 
 impl RequestMethod {
@@ -18,6 +20,8 @@ impl RequestMethod {
         match self {
             Self::Get => Method::GET,
             Self::Post => Method::POST,
+            Self::Put => Method::PUT,
+            Self::Delete => Method::DELETE,
         }
     }
 }
@@ -228,7 +232,14 @@ mod tests {
             serde_json::from_str::<RequestMethod>("\"POST\"").unwrap(),
             RequestMethod::Post
         );
-        assert!(serde_json::from_str::<RequestMethod>("\"DELETE\"").is_err());
+        assert_eq!(
+            serde_json::from_str::<RequestMethod>("\"PUT\"").unwrap(),
+            RequestMethod::Put
+        );
+        assert_eq!(
+            serde_json::from_str::<RequestMethod>("\"DELETE\"").unwrap(),
+            RequestMethod::Delete
+        );
     }
 
     #[test]

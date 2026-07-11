@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 
 from polaris.backup import BackupReport
 from polaris.cli.main import app
+from polaris.config import AppConfig, DaemonConfig, ToolConfig, save_config
 
 runner = CliRunner()
 cli_main = import_module("polaris.cli.main")
@@ -92,3 +93,52 @@ def test_backup_commands_use_environment_passphrase_without_echo(
         ("export", tmp_path / "new.polaris-backup", "top-secret-password"),
         ("import", archive, "top-secret-password", True),
     ]
+
+
+def test_secrets_commands_store_and_list_names_without_echoing_value(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config_file = tmp_path / "config.json"
+    secrets_file = tmp_path / "runtime-secrets.env"
+    save_config(
+        AppConfig(
+            data_dir=tmp_path,
+            tools=ToolConfig(roots=(tmp_path,)),
+            daemon=DaemonConfig(secrets_file=secrets_file),
+        ),
+        config_file,
+    )
+    monkeypatch.setenv("SOURCE_SECRET", "never-echo-this-value")
+
+    stored = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_file),
+            "secrets",
+            "set",
+            "MODEL_TOKEN",
+            "--from-env",
+            "SOURCE_SECRET",
+        ],
+    )
+    listed = runner.invoke(app, ["--config", str(config_file), "secrets", "list"])
+    checked = runner.invoke(
+        app,
+        ["--config", str(config_file), "secrets", "check", "MODEL_TOKEN"],
+    )
+    removed = runner.invoke(
+        app,
+        ["--config", str(config_file), "secrets", "remove", "MODEL_TOKEN"],
+    )
+    listed_after_remove = runner.invoke(
+        app,
+        ["--config", str(config_file), "secrets", "list"],
+    )
+
+    assert stored.exit_code == listed.exit_code == checked.exit_code == removed.exit_code == 0
+    output = stored.output + listed.output + checked.output + removed.output
+    assert "never-echo-this-value" not in output
+    assert listed.output.strip() == "MODEL_TOKEN"
+    assert listed_after_remove.exit_code == 0
+    assert listed_after_remove.output == ""
