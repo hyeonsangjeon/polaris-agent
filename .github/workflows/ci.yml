@@ -110,7 +110,7 @@ jobs:
           -f deploy/docker/compose.secrets.yaml
           config --quiet
       - name: Build image
-        uses: docker/bake-action@v6
+        uses: docker/bake-action@v7
         with:
           files: compose.yaml
           load: false
